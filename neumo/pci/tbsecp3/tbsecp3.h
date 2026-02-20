@@ -280,6 +280,9 @@ extern void tbsecp3_i2c_exit(struct tbsecp3_dev *dev);
 extern void tbsecp3_i2c_reg_init(struct tbsecp3_dev *dev);
 extern void tbsecp3_i2c_remove_clients(struct tbsecp3_adapter *adapter);
 
+/* tbspcie-core.c */
+extern int tbs6909x_i2c_speed;
+
 /* tbspcie-cards.c */
 extern struct tbsecp3_board tbsecp3_boards[];
 

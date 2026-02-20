@@ -164,6 +164,11 @@ void tbsecp3_i2c_reg_init(struct tbsecp3_dev *dev)
 	if (!baud)
 		baud = 9;
 
+	if (tbs6909x_i2c_speed > 0 && dev->info->board_id == TBSECP3_BOARD_TBS6909X) {
+		dev_info(&dev->pci_dev->dev, "TBS6909X: overriding i2c_speed from %d to %d\n", baud, tbs6909x_i2c_speed);
+		baud = tbs6909x_i2c_speed;
+	}
+
 	for (i = 0; i < 4; i++) {
 		tbs_write(dev->i2c_bus[i].base, TBSECP3_I2C_BAUD, baud);
 		tbs_read(dev->i2c_bus[i].base, TBSECP3_I2C_STAT);

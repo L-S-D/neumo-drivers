@@ -27,6 +27,12 @@ MODULE_PARM_DESC(cimode,
 	"set the ci mode,0=Tuners and CAMs are separated into mulitple adapters, \
 	 1= Tuner and cam in same adapters");
 
+int tbs6909x_i2c_speed = 0;
+module_param(tbs6909x_i2c_speed, int, 0444);
+MODULE_PARM_DESC(tbs6909x_i2c_speed,
+	"Override I2C baud rate for TBS6909X (default:0 - use board default of 9/434kHz). "
+	"Values: 9=434kHz, 39=100kHz, 3=1302kHz");
+
 struct workqueue_struct *tbs_wq;   //sec
 
 #define dprintk(fmt, arg...)																					\
