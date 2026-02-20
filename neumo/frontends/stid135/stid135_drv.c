@@ -4419,7 +4419,7 @@ fe_lla_error_t FE_STiD135_Algo(struct stv* state, BOOL satellite_scan, enum fe_s
 				int limit=220;
 				while ((fld_value != TRUE) && (pdel_status_timeout < limit)) {
 					state_chip_sleep(state, 5);
-					pdel_status_timeout = (u8)(pdel_status_timeout + 5);
+					pdel_status_timeout += 5;
 					//stv09x1 checks bit 1 (PKTDELIN_LOCK)  whereas this code checks bit 0 ( FIRST_LOCK)
 					error |= (error1=ChipGetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_PDELSTATUS1_FIRST_LOCK(Demod), &fld_value));
 					if(error1)
