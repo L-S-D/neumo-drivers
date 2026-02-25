@@ -1830,6 +1830,7 @@ fe_lla_error_t fe_stid135_get_lock_status(struct stv* state, bool*carrier_lock, 
 			if(!state->signal_info.has_sync)
 				state_dprintk("demod=%d: DVBS2 NO SYNC: %d %d %d\n", state->nr,  fld_value[0] , fld_value[1] , fld_value[2]);
 		}
+#if 0
 		if(!state->signal_info.has_sync)
 			vprintk("demod=%d: DVBS2 NO SYNC: %d %d %d\n", state->nr,  fld_value[0] , fld_value[1] , fld_value[2]);
 		if(state->signal_info.has_lock && !(
@@ -1838,7 +1839,6 @@ fe_lla_error_t fe_stid135_get_lock_status(struct stv* state, bool*carrier_lock, 
 																				 state->signal_info.has_sync)) {
 			print_signal_info(state);
 		}
-#if 0
 		state_dprintk("demod=%d demodState=%d carr=%d lock=%d vit=%d sync=%d tmg=%d: 0x%x 0x%x 0x%x 0x%x\n", state->nr, demodState, state->signal_info.has_carrier,
 						state->signal_info.has_lock, state->signal_info.has_viterbi, state->signal_info.has_sync, state->signal_info.has_timing_lock,
 						fld_value[0],fld_value[1],fld_value[2], fld_value[4]);
@@ -1890,20 +1890,20 @@ fe_lla_error_t fe_stid135_get_lock_status(struct stv* state, bool*carrier_lock, 
 			if(!state->signal_info.has_sync)
 				state_dprintk("NO SYNC: %d %d\n",  fld_value[0] , fld_value[1]);
 		}
+#if 0
 		if(state->signal_info.has_lock && !(
 																				 state->signal_info.has_carrier &&
 																				 state->signal_info.has_viterbi &&
 																				 state->signal_info.has_sync)) {
 			print_signal_info(state);
 		}
-#if 0
 		state_dprintk("demod=%d demodState=%d carr=%d lock=%d vit=%d sync=%d tmg=%d: 0x%x 0x%x 0x%x 0x%x\n", state->nr, demodState, state->signal_info.has_carrier,
 						state->signal_info.has_lock, state->signal_info.has_viterbi, state->signal_info.has_sync, state->signal_info.has_timing_lock,
 						fld_value[0],fld_value[1],fld_value[2], fld_value[4]);
 #endif
 		break;
 	}
-	state->signal_info.has_timedout = !state->signal_info.has_lock;
+	state->signal_info.has_timedout = !state->signal_info.has_sync;
 	return error;
 }
 
