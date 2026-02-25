@@ -1550,11 +1550,9 @@ static int stid135_read_status_(struct neumo_dvb_frontend* fe, enum fe_status *s
 	if(state->signal_info.has_carrier)
 		*status |= (FE_HAS_SIGNAL|FE_HAS_CARRIER);
 	if(state->signal_info.has_viterbi)
-		*status |= FE_HAS_VITERBI|FE_HAS_LOCK;
+		*status |= FE_HAS_VITERBI;
 	if(state->signal_info.has_sync)
 		*status |= FE_HAS_SYNC|FE_HAS_LOCK;
-	if(state->signal_info.has_lock)
-		*status |= FE_HAS_LOCK;
 	if(state->signal_info.has_timing_lock)
 		*status |= FE_HAS_TIMING_LOCK;
 	if(state->signal_info.has_timedout)
@@ -1646,7 +1644,7 @@ static int stid135_read_status_(struct neumo_dvb_frontend* fe, enum fe_status *s
 	p->num_matypes = state->signal_info.isi_list.num_matypes;
 	vprintk("p->num_matypes=%d %d\n", p->num_matypes, state->signal_info.isi_list.num_matypes);
 
-	{
+	if(state->signal_info.has_viterbi) {
 		if(state->signal_info.low_roll_off_detected) {
 #if 0 //interferes with bbframes_on
 			if(!((matype &0x3) == 0x3)) {
@@ -1689,10 +1687,11 @@ static int stid135_read_status_(struct neumo_dvb_frontend* fe, enum fe_status *s
 			state->signal_info.roll_off = FE_SAT_LOW;
 			break;
 		}
+		p->matype_val = state->signal_info.matype;
+		p->matype_valid = true;
+	} else {
+		p->matype_valid = false;
 	}
-
-	p->matype_val = state->signal_info.matype;
-	p->matype_valid = true;
 
 	p->frequency = state->signal_info.frequency;
 	p->symbol_rate = state->signal_info.symbol_rate;
@@ -1707,10 +1706,13 @@ static int stid135_read_status_(struct neumo_dvb_frontend* fe, enum fe_status *s
 
 	p->pilot = state->signal_info.pilots == FE_SAT_PILOTS_ON ? PILOT_ON : PILOT_OFF;
 	p->fec_inner = dvb_fec(state, p->delivery_system);
-	p->stream_id = ((state->mis_mode ? (state->signal_info.isi &0xff) :0xff) |
-									(state->signal_info.pls_mode << 26) |
-									((state->signal_info.pls_code &0x3FFFF)<<8)
-									);
+	if(state->signal_info.has_viterbi)
+		p->stream_id = ((state->mis_mode ? (state->signal_info.isi &0xff) :0xff) |
+										(state->signal_info.pls_mode << 26) |
+										((state->signal_info.pls_code &0x3FFFF)<<8)
+										);
+	else
+		p->stream_id = NO_STREAM_ID_FILTER;
 	vprintk("read stream_id mis=%d pls_mode=0x%x pls_code=0x%x stream_id=0%x fec=%d",
 					state->mis_mode,
 					state->signal_info.pls_mode, state->signal_info.pls_code, p->stream_id, p->fec_inner);
@@ -1741,7 +1743,7 @@ static int stid135_read_status(struct neumo_dvb_frontend* fe, enum fe_status *st
 	struct stv *state = fe->demodulator_priv;
 	int ret = 0;
 	if (!state_chip_trylock(state)) {
-		if (state->signal_info.has_viterbi) {//XX: official driver tests for has_sync?
+		if (state->signal_info.has_sync) {
 			*status |= FE_HAS_SIGNAL | FE_HAS_CARRIER
 				| FE_HAS_VITERBI | FE_HAS_SYNC | FE_HAS_LOCK;
 		}
