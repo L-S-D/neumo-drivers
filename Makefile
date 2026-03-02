@@ -83,6 +83,14 @@ MODDEFS := CONFIG_DVB_MMAP=y \
 	CONFIG_DVB_MN88473=m \
 	CONFIG_DVB_CXD2820=m \
 	CONFIG_DVB_CXD2820R=m \
+	CONFIG_DVB_DDBRIDGE=m \
+	CONFIG_DVB_CXD2099=m \
+	CONFIG_DVB_CXD2843=m \
+	CONFIG_DVB_LNBH25=m \
+	CONFIG_DVB_LNBP21=m \
+	CONFIG_DVB_STV0367DD=m \
+	CONFIG_DVB_TDA18212DD=m \
+	CONFIG_DVB_TDA18271C2DD=m \
 	CONFIG_DVB_NET=y
 
 
@@ -92,7 +100,8 @@ EXTRA_CFLAGS += -I$(NEUMO_DIR)/include \
                 -I$(NEUMO_DIR)/dvb-core \
                 -I$(NEUMO_DIR)/frontends \
                 -I$(NEUMO_DIR)/frontends/stid135 \
-                -I$(NEUMO_DIR)/tuners
+                -I$(NEUMO_DIR)/tuners \
+                -I$(NEUMO_DIR)/pci/ddbridge
 
 EXTRA_CFLAGS += -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0
 # --- Targets ---

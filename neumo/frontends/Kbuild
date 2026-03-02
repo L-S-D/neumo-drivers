@@ -61,3 +61,12 @@ m88rs6060-objs := m88rs6060_drv.o \
 obj-$(CONFIG_DVB_M88RS6060) += m88rs6060.o
 
 obj-$(CONFIG_DVB_CXD2878) += cxd2878.o
+
+# DigitalDevices frontend drivers
+obj-$(CONFIG_DVB_CXD2099) += cxd2099.o
+obj-$(CONFIG_DVB_CXD2843) += cxd2843.o
+obj-$(CONFIG_DVB_LNBH25) += lnbh25.o
+obj-$(CONFIG_DVB_LNBP21) += lnbp21.o
+obj-$(CONFIG_DVB_STV0367DD) += stv0367dd.o
+obj-$(CONFIG_DVB_TDA18212DD) += tda18212dd.o
+obj-$(CONFIG_DVB_TDA18271C2DD) += tda18271c2dd.o

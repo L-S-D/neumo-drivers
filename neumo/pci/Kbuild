@@ -6,6 +6,7 @@
 # Please keep it alphabetically sorted by Kconfig name
 # (e. g. LC_ALL=C sort Makefile)
 
+obj-$(CONFIG_DVB_DDBRIDGE) += ddbridge/
 obj-$(CONFIG_DVB_SAA716X_CORE) += saa716x/
 #obj-$(CONFIG_TBS_PCIE_CAP) += tbscapture/
 #obj-$(CONFIG_TBS_PCIE2_CAP) += tbscapture2/
