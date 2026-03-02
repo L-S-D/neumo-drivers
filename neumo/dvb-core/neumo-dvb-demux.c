@@ -1644,6 +1644,19 @@ static void stid_stream_add_packet(struct neumo_dvb_demux* demux, struct stid_st
 	if(!stid->emb.current_bbf || (!stid->emb.current_bbf->synced && !bbframe_starts))
 		return;
 	stid->emb.current_bbf->synced = true;
+
+	/* Non-TS BBFrames (GSE/GCS): pass raw pseudo-TS packet directly to feeds.
+	 * bbf_output_ts_bytes assumes TS content (replaces sync byte, uses UPL for
+	 * packet boundaries) which corrupts GSE/GCS data. For non-TS streams, the
+	 * userspace BBFrame parser needs the raw pseudo-TS as-is. */
+	{
+		int ts_gs = (stid->emb.current_bbf->matype >> 6) & 0x3;
+		if (ts_gs != 3 && stid->emb.current_bbf->feeds) {
+			neumo_dvb_dmx_swfilter_packet(demux, packet, stid->emb.current_bbf->feeds, true);
+			return;
+		}
+	}
+
 	n = 188 - (p-packet);
 	if( n<0) {
 		dmx_demux_dprintk_nice(stid->emb.current_bbf, "Implementation error n=%d\n", n);
