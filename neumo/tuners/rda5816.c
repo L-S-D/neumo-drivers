@@ -448,6 +448,64 @@ static void rda5816_release(struct neumo_dvb_frontend* fe)
 	kfree(priv);
 	priv= NULL;
 }
+static int rda5816_set_frequency(struct neumo_dvb_frontend *fe, u32 frequency)
+{
+	struct rda5816_priv *priv = fe->tuner_priv;
+	u8 buffer;
+	u32 fPLL, temp_value = 0;
+
+	fPLL = frequency / 1000; /* Hz to MHz */
+
+	rda5816_wr(priv, 0x04, 0xc1);
+
+	if (fPLL > 1075) {
+		rda5816_rd(priv, 0x65, &buffer);
+		buffer &= 0xF7;
+		buffer |= 0x10;
+		rda5816_wr(priv, 0x65, buffer);
+	} else {
+		rda5816_rd(priv, 0x65, &buffer);
+		buffer &= 0xEF;
+		buffer |= 0x08;
+		rda5816_wr(priv, 0x65, buffer);
+		fPLL = fPLL * 2;
+	}
+
+	if (priv->cfg->xtal)
+		temp_value = (unsigned long)fPLL * 77672;
+	else
+		temp_value = (unsigned long)fPLL * 87381;
+
+	rda5816_wr(priv, 0x07, (u8)((temp_value >> 24) & 0xff));
+	rda5816_wr(priv, 0x08, (u8)((temp_value >> 16) & 0xff));
+	rda5816_wr(priv, 0x09, (u8)((temp_value >> 8) & 0xff));
+	rda5816_wr(priv, 0x0a, (u8)(temp_value & 0xff));
+
+	rda5816_wr(priv, 0x04, 0xc3);
+	msleep(5);
+
+	return 0;
+}
+
+static int rda5816_set_bandwidth(struct neumo_dvb_frontend *fe, u32 bandwidth)
+{
+	struct rda5816_priv *priv = fe->tuner_priv;
+	u8 filter_bw;
+
+	/* bandwidth is in kHz, convert to MHz for filter calc */
+	filter_bw = (u8)((bandwidth / 1000 * 135 / 200 + 4000) / 1000);
+	if (filter_bw < 4)
+		filter_bw = 4;
+	else if (filter_bw > 40)
+		filter_bw = 40;
+
+	filter_bw &= 0x3f;
+	filter_bw |= 0x40;
+	rda5816_wr(priv, 0x0b, filter_bw);
+
+	return 0;
+}
+
 static const struct neumo_dvb_tuner_ops rda5816_tuner_ops = {
 	.info = {
 		.name           = "RDA5816",
@@ -460,6 +518,8 @@ static const struct neumo_dvb_tuner_ops rda5816_tuner_ops = {
 	.init = rda5816_init,
 	.get_status = rda5816_get_status,
 	.set_params = rda5816_set_params,
+	.set_frequency = rda5816_set_frequency,
+	.set_bandwidth = rda5816_set_bandwidth,
 	.get_rf_strength = rda5816_get_rf_strength,
 };
 

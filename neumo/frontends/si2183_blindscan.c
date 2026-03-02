@@ -1150,10 +1150,10 @@ int si2183_spectrum_start(struct neumo_dvb_frontend *fe,
 	ss->spectrum_max_len = num_freq;
 	ss->spectrum_len = 0;
 
-	if(!fe->ops.tuner_ops.set_frequency_and_bandwidth ||
+	if(!fe->ops.tuner_ops.set_frequency_and_bandwidth &&
 		 !(fe->ops.tuner_ops.set_frequency && fe->ops.tuner_ops.set_bandwidth)) {
 		dprintk("No tuner support %p %p %p", fe->ops.tuner_ops.set_frequency_and_bandwidth,
-						fe->ops.tuner_ops.set_frequency,fe->ops.tuner_ops.set_frequency);
+						fe->ops.tuner_ops.set_frequency,fe->ops.tuner_ops.set_bandwidth);
 	 return -EINVAL; //TODO
 	}
 
@@ -1170,6 +1170,7 @@ int si2183_spectrum_start(struct neumo_dvb_frontend *fe,
 	is_sat=true;
 
 
+	p->frequency = p->scan_start_frequency;
 	si2183_spectrum_init(fe, bs);
 	while (scan_status->buz == Si2183_SCAN_STATUS_RESPONSE_BUZ_BUSY) {
 		if ((count% 20==19) && (kthread_should_stop() || neumo_dvb_frontend_task_should_stop(fe))) {
