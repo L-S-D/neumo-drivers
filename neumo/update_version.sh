@@ -16,7 +16,7 @@ void neumo_git_versions(const char ** neumo, const char ** rev, const char ** ta
 	*rev="GIT-REV = \"$rev\";";
 	*tag="GIT-TAG = \"$tag\";";
 	*branch="GIT-BRANCH = \"$branch\";";
-	*neumo  = "type = \"neumo\";\nversion = \"2.0\";";
+	*neumo  = "type = \"neumo\";\nversion = \"2.1\";";
 }
 
 EXPORT_SYMBOL(neumo_git_versions);

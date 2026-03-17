@@ -790,7 +790,7 @@ restart:
 			algo = fe->ops.get_frontend_algo(fe);
 			switch (algo) {
 			case DVBFE_ALGO_HW:
-				fe_dprintk(fe, "Frontend ALGO = DVBFE_ALGO_HW\n");
+				//fe_dprintk(fe, "Frontend ALGO = DVBFE_ALGO_HW\n");
 				hw_algo(fepriv, fe, &re_tune, &status);
 				atomic_set(&fepriv->algo_state.task_should_stop, false);
 				break;
@@ -1137,6 +1137,8 @@ static int dvb_frontend_clear_cache(struct neumo_dvb_frontend* fe)
 	c->pls_search_codes_len = 0;
 	c->pls_search_range_start = 0;
 	c->pls_search_range_end = 0;
+	c-> pls_code = -1;
+	c-> pls_mode = -1;
 	return 0;
 }
 
@@ -1223,7 +1225,10 @@ struct dtv_cmds_h dtv_cmds[] = {
 
 	_DTV_CMD(DTV_STREAM_ID, 1, 0),
 	_DTV_CMD(DTV_MODCODE, 1, 0),
+	_DTV_CMD(DTV_MODCOD_LIST, 1, 0),
 	_DTV_CMD(DTV_SCRAMBLING_SEQUENCE_INDEX, 1, 0),
+	_DTV_CMD(DTV_PLS_MODE, 1, 0),
+	_DTV_CMD(DTV_PLS_CODE, 1, 0),
 	_DTV_CMD(DTV_MATYPE, 0, 0),
 	_DTV_CMD(DTV_ENABLE_MODCOD, 1, 0),
 	_DTV_CMD(DTV_LNA, 1, 0),
@@ -1449,6 +1454,7 @@ static int dvb_frontend_handle_algo_ctrl_ioctl(struct file *file,
 static int dtv_set_sat_scan(struct neumo_dvb_frontend* fe, bool scan_continue);
 static int dtv_set_spectrum(struct neumo_dvb_frontend* fe, enum dtv_fe_spectrum_method method);
 static int dtv_get_spectrum(struct neumo_dvb_frontend* fe, struct dtv_fe_spectrum*user);
+static int dtv_get_modcod_list(struct neumo_dvb_frontend* fe, struct dtv_modcod_list* user);
 static int dtv_set_pls_search_list(struct neumo_dvb_frontend* fe, struct dtv_pls_search_list* user);
 static int dtv_get_pls_search_list(struct neumo_dvb_frontend* fe, struct dtv_pls_search_list* user);
 static int dtv_set_constellation(struct neumo_dvb_frontend* fe, struct dtv_fe_constellation* constellation);
@@ -1656,9 +1662,22 @@ static int neumouapi_dtv_property_process_get(struct neumo_dvb_frontend* fe,
 		tvp->u.data = c->modcode;
 		break;
 
+		/* Modcode support */
+	case DTV_MODCOD_LIST:
+		dtv_get_modcod_list(fe, &tvp->u.modcod_list);
+		break;
+
 	/* Physical layer scrambling support */
 	case DTV_SCRAMBLING_SEQUENCE_INDEX:
 		tvp->u.data = c->scrambling_sequence_index;
+		break;
+
+	case DTV_PLS_MODE:
+		tvp->u.data = c->pls_mode;
+		break;
+
+	case DTV_PLS_CODE:
+		tvp->u.data = c->pls_code;
 		break;
 
 	case DTV_MATYPE:
@@ -1908,6 +1927,14 @@ static int dvbuapi_dtv_property_process_get(struct neumo_dvb_frontend* fe,
 	/* Physical layer scrambling support */
 	case DTV_SCRAMBLING_SEQUENCE_INDEX:
 		tvp->u.data = c->scrambling_sequence_index;
+		break;
+
+	case DTV_PLS_MODE:
+		tvp->u.data = c->pls_mode;
+		break;
+
+	case DTV_PLS_CODE:
+		tvp->u.data = c->pls_code;
 		break;
 
 	/* ATSC-MH */
@@ -2401,6 +2428,15 @@ static int dtv_property_process_set_int(struct neumo_dvb_frontend* fe,
 	case DTV_SCRAMBLING_SEQUENCE_INDEX:
 		c->scrambling_sequence_index = data;
 		break;
+
+	case DTV_PLS_MODE:
+		c->pls_mode = data;
+		break;
+
+	case DTV_PLS_CODE:
+		c->pls_code = data;
+		break;
+
 #ifdef TODO
 	case DTV_ENABLE_MODCOD:
 		c->enable_modcod = data;
@@ -3126,6 +3162,23 @@ static int dtv_set_spectrum(struct neumo_dvb_frontend* fe, enum dtv_fe_spectrum_
 	neumo_dvb_frontend_add_event(fe, 0);
 	neumo_dvb_frontend_wakeup(fe);
 	fepriv->status = 0;
+
+	return 0;
+}
+
+static int dtv_get_modcod_list(struct neumo_dvb_frontend* fe, struct dtv_modcod_list* user)
+{
+	struct neumo_dtv_frontend_properties *c = &fe->dtv_property_cache;
+
+	if(!user)
+		return -1;
+
+	if(user->num_entries > c->num_modcods)
+		user->num_entries = c->num_modcods;
+
+	if(copy_to_user((void __user *)user->entries, c->modcod_entries,
+									user->num_entries * sizeof(user->entries[0])))
+		return -EFAULT;
 
 	return 0;
 }

@@ -660,7 +660,7 @@ struct neumo_dvb_fe_events {
 	This is asking for trouble. Either we should include dvbapi's dvb_frontend.h (risking all kinds of
 	name clashes  or check for problems  during compilation
 */
-	struct neumo_dtv_frontend_properties {
+struct neumo_dtv_frontend_properties {
 	u32			frequency;
 	enum fe_modulation	modulation;
 
@@ -691,10 +691,10 @@ struct neumo_dvb_fe_events {
 	u32			isdbt_sb_segment_count;
 	u8			isdbt_layer_enabled;
 	struct {
-	    u8			segment_count;
-	    enum fe_code_rate	fec;
-	    enum fe_modulation	modulation;
-	    u8			interleaving;
+		u8			segment_count;
+		enum fe_code_rate	fec;
+		enum fe_modulation	modulation;
+		u8			interleaving;
 	} layer[3];
 
 	/* Multistream specifics */
@@ -722,17 +722,6 @@ struct neumo_dvb_fe_events {
 	u8			atscmh_sccc_code_mode_d;
 
 	u32			lna;
-
-	/* statistics data */
-	struct dtv_fe_stats	strength;
-	struct dtv_fe_stats	cnr;
-	struct dtv_fe_stats	pre_bit_error;
-	struct dtv_fe_stats	pre_bit_count;
-	struct dtv_fe_stats	post_bit_error;
-	struct dtv_fe_stats	post_bit_count;
-	struct dtv_fe_stats	block_error;
-	struct dtv_fe_stats	block_count;
-#if 1 //neumo
 	u32			search_range;
 	enum fe_algorithm algorithm;
 	/* for satellite_search and get_spectrum */
@@ -741,11 +730,13 @@ struct neumo_dvb_fe_events {
 	s32 scan_resolution;
 	s32 scan_fft_size;
 	u8 plp_id;
-#endif
-	#if 1 //neumo
 	u32		isi_bitset[8];
 	u16		matypes[256];
+	struct dtv_modcod_entry modcod_entries[128];
+	int num_modcods;
 	int num_matypes;
+	int pls_mode;
+	int pls_code;
 	u32		pls_search_codes[64];
 	u32		pls_search_range_start;
 	u32		pls_search_range_end;
@@ -753,8 +744,8 @@ struct neumo_dvb_fe_events {
 	u32   bit_rate;
 	u32   locktime; //in ms
 	bool output_bbframes;
-#endif
-	#if 1  //TBS
+
+#if 1  //TBS
 	bool    vcm; //1 if vcm else ccm
 #endif
 #if 1 //neumo
@@ -772,6 +763,18 @@ struct neumo_dvb_fe_events {
 
 	struct dtv_fe_constellation constellation;
 #endif
+		/*important: variables up to here are cleared by DTV_CLEAR
+			Maybe the following ones need clearing as well.
+		 */
+	/* statistics data */
+	struct dtv_fe_stats	strength;
+	struct dtv_fe_stats	cnr;
+	struct dtv_fe_stats	pre_bit_error;
+	struct dtv_fe_stats	pre_bit_count;
+	struct dtv_fe_stats	post_bit_error;
+	struct dtv_fe_stats	post_bit_count;
+	struct dtv_fe_stats	block_error;
+	struct dtv_fe_stats	block_count;
 
 };
 

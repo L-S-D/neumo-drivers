@@ -1300,9 +1300,15 @@ static int stid135_set_parameters(struct neumo_dvb_frontend* fe)
 	search_params.isi = p->stream_id & 0xff;
 	if (search_params.isi== 0xff)
 		search_params.isi = -1;
-	search_params.pls_mode = ((p->stream_id >>26) & 0x3);
-	search_params.pls_code = ((p->stream_id >> 8)  & 0x3FFFF);
-	state_dprintk("pls_mode=%d pls_code=%d\n", search_params.pls_mode, search_params.pls_code);
+	if(p->pls_mode >=0) {
+		search_params.pls_mode = p->pls_mode;
+		search_params.pls_code = p->pls_code;
+	} else if (p->stream_id != -1) {
+		search_params.pls_mode = ((p->stream_id >>26) & 0x3);
+		search_params.pls_code = ((p->stream_id >> 8)  & 0x3FFFF);
+	}
+	state_dprintk("parameters: pls_mode=%d pls_code=%d stream_id=%d\n", search_params.pls_mode,
+								search_params.pls_code, p->stream_id);
 	search_params.frequency		=  p->frequency*1000;
 	//search_params.symbol_rate		=		p->symbol_rate;
 	vprintk("[%d] symbol_rate=%dkS/s\n", state->nr+1, p->symbol_rate/1000);
@@ -1390,7 +1396,10 @@ static int stid135_set_parameters(struct neumo_dvb_frontend* fe)
 		if(locked) {
 			dprintk("demod=%d: PLS locked=%d\n", state->nr, locked);
 			state_dprintk("Calling isi_scan\n");
-			err = fe_stid135_isi_scan(state, &state->signal_info.isi_list);
+			err = fe_stid135_isi_and_modcod_scan(state, false /*modcod_only*/);
+			p->pls_mode = state->signal_info.pls_mode;
+			p->pls_code = state->signal_info.pls_code;
+
 			if(state->mis_mode && p->stream_id == NO_STREAM_ID_FILTER) {
 				if(state->signal_info.isi_list.default_isi >=0) {
 					state_dprintk("User requested single stream or any stream; arbitrarily choosing isi=%d (%d)\n",
@@ -1404,6 +1413,7 @@ static int stid135_set_parameters(struct neumo_dvb_frontend* fe)
 					}
 			}
 		} else if(state->signal_info.fec_locked) {
+			state_dprintk("Calling set_pls_mode_code");
 			set_pls_mode_code(state, 0, 1);
 		}
 		vprintk("After Trying pls: p->stream_id=%d locked=%d\n", p->stream_id, locked);
@@ -1500,17 +1510,6 @@ static int stid135_set_parameters(struct neumo_dvb_frontend* fe)
 		dev_dbg(&state->chip->i2c->dev, "%s: disable ISI filtering !\n", __func__);
 		err |= fe_stid135_set_mis_filtering(state, FALSE, 0, 0xFF);
 	}
-	if(p->stream_id == NO_STREAM_ID_FILTER) {
-		state->signal_info.pls_mode = 0x00; //ROOT
-		state_dprintk("setting pls_code=1 was %d \n", state->signal_info.pls_code);
-		state->signal_info.pls_code = 1;
-	} else {
-#if 0
-		state->signal_info.pls_mode = ((p->stream_id >>26) & 0x3);
-		state->signal_info.pls_code = ((p->stream_id >> 8)  & 0x3FFFF);
-#endif
-	}
-
 	dprintk("set state->signal_info pls_mode=0x%x pls_code=0x%x stream_id=0%x",
 					state->signal_info.pls_mode, state->signal_info.pls_code, p->stream_id);
 
@@ -1630,10 +1629,26 @@ static int stid135_read_status_(struct neumo_dvb_frontend* fe, enum fe_status *s
 	//update isi list
 	if(state->mis_mode) {
 		vprintk("ISI calling isi_scan\n");
-		err = fe_stid135_isi_scan(state, &state->signal_info.isi_list);
-	}
+		err = fe_stid135_isi_and_modcod_scan(state, false/*only modcode*/);
+	} else
+		err = fe_stid135_isi_and_modcod_scan(state, true/*only modcode*/);
 	memcpy(p->isi_bitset, state->signal_info.isi_list.isi_bitset, sizeof(p->isi_bitset));
 	memcpy(p->matypes, state->signal_info.isi_list.matypes, sizeof(p->matypes));
+	const int num_modcods = sizeof(state->signal_info.modcod_list.count)/sizeof(state->signal_info.modcod_list.count[0]);
+	int tot = state->signal_info.modcod_list.totcount;
+	p->num_modcods = 0;
+	for(int i=0 ; i < num_modcods; ++i) {
+		int count = state->signal_info.modcod_list.count[i];
+		if(count >0) {
+			int frac = (count * 1000 + 499) / tot;
+			if(frac >=1) {
+				struct dtv_modcod_entry* e = &p->modcod_entries[p->num_modcods];
+				e->modcod= i;
+				e->frac = frac;
+				p->num_modcods++;
+			}
+		}
+	}
 	if(p->output_bbframes) {
 		struct neumo_dvb_demux * demux = state->demux;
 		int32_t isi_bitset[8];
@@ -1702,8 +1717,22 @@ static int stid135_read_status_(struct neumo_dvb_frontend* fe, enum fe_status *s
 	p->rolloff = dvb_rolloff(state);
 
 	p->inversion = state->signal_info.spectrum == FE_SAT_IQ_SWAPPED ? INVERSION_ON : INVERSION_OFF;
-	p->modcode = state->signal_info.modcode;
+#if 0
+	bool is_dvbs = (p->delivery_system == SYS_DVBS);
+	if(!is_dvbs) {
+		for (int count=0; count < 5; ++count) {
+			enum fe_sat_modcode	modcode;
+			enum fe_sat_pilots		pilots;		/* pilots on,off only for DVB-S2			*/
+			enum fe_sat_frame		frame_length;	/* Found frame length only for DVB-S2			*/
+			fe_stid135_get_mod_code(state, &modcode, &frame_length, &pilots);
+			state_dprintk("QQQ modcode=%d pilots=%d frame_length=%d\n", modcode, frame_length, pilots);
+		}
+	}
+#endif
 
+	p->modcode = state->signal_info.modcode;
+	p->pls_mode = state->signal_info.pls_mode;
+	p->pls_code = state->signal_info.pls_code;
 	p->pilot = state->signal_info.pilots == FE_SAT_PILOTS_ON ? PILOT_ON : PILOT_OFF;
 	p->fec_inner = dvb_fec(state, p->delivery_system);
 	if(state->signal_info.has_viterbi)
@@ -1786,10 +1815,11 @@ static int stid135_set_demux_default_stream_id(struct neumo_dvb_frontend* fe) {
 	struct neumo_dvb_demux * demux = state->demux;
 	bool output_bbframes = false;
 	int ret=0;
+	bool is_dvbs = (p->delivery_system = SYS_DVBS);
 	int stream_id = p->stream_id & 0xff;
 	bool is_dvbs1 = (state->signal_info.standard == FE_SAT_DVBS1_STANDARD);
-	bool is_mis = !((state->signal_info.matype >> 5) &0x1);
-	bool is_ts = ((state->signal_info.matype >> 6) &0x3) == 0x3;
+	bool is_mis = !is_dvbs && !((state->signal_info.matype >> 5) &0x1);
+	bool is_ts = is_dvbs || (((state->signal_info.matype >> 6) &0x3) == 0x3);
 	dprintk("isi=%d/%d is_mis=%d is_ts=%d is_dvbs1=%d\n", state->signal_info.isi, (p->stream_id)&0xff, is_mis, is_ts, is_dvbs1);
 	if(stream_id==0xff)
 		stream_id = -1;
@@ -1801,13 +1831,15 @@ static int stid135_set_demux_default_stream_id(struct neumo_dvb_frontend* fe) {
 			dprintk("DVB-S detected - ignoring output_bbframes=1 request\n");
 	} else {
 #if 0
-	output_bbframes = (p->output_bbframes || (bbframes_auto && is_mis && is_ts)) && (stream_id!=-1);
+	output_bbframes = (p->output_bbframes || (bbframes_auto && is_mis && is_ts
+																						)) && (stream_id!=-1);
 #else
-	output_bbframes = p->output_bbframes || (bbframes_auto && is_mis && is_ts);
+	output_bbframes = p->output_bbframes || (bbframes_auto && !is_dvbs && is_mis && is_ts);
 #endif
 	}
-	state_dprintk("before: p->output_bbframes=%d stream_id=%d bbframes_auto=%d is_mis=%d is_ts=%d matype=0x%x\n",
-								p->output_bbframes, stream_id, bbframes_auto, is_mis, is_ts, state->signal_info.matype);
+	state_dprintk("before: p->output_bbframes=%d/%d stream_id=%d bbframes_auto=%d is_mis=%d is_ts=%d matype=0x%x\n",
+								p->output_bbframes, output_bbframes,
+								stream_id, bbframes_auto, is_mis, is_ts, state->signal_info.matype);
 	p->output_bbframes = output_bbframes;
 
 	if(demux) {
@@ -1821,8 +1853,8 @@ static int stid135_set_demux_default_stream_id(struct neumo_dvb_frontend* fe) {
 }
 
 static int stid135_tune_(struct neumo_dvb_frontend* fe, bool re_tune,
-		unsigned int mode_flags,
-		unsigned int *delay, enum fe_status *status)
+												 unsigned int mode_flags,
+												 unsigned int *delay, enum fe_status *status)
 {
 	struct stv *state = fe->demodulator_priv;
 	int r;
@@ -1891,8 +1923,8 @@ static int stid135_tune_(struct neumo_dvb_frontend* fe, bool re_tune,
 static int stid135_constellation_start_(struct neumo_dvb_frontend* fe, struct dtv_fe_constellation* user, int max_num_samples);
 
 static int stid135_tune(struct neumo_dvb_frontend* fe, bool re_tune,
-		unsigned int mode_flags,
-		unsigned int *delay, enum fe_status *status)
+												unsigned int mode_flags,
+												unsigned int *delay, enum fe_status *status)
 {
 	struct stv *state = fe->demodulator_priv;
 	struct neumo_dtv_frontend_properties *p = &fe->dtv_property_cache;

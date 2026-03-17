@@ -752,7 +752,7 @@ fe_lla_error_t fe_stid135_filter_forbidden_modcodes(struct stv* state,
 
 fe_lla_error_t fe_stid135_get_soc_temperature(struct fe_stid135_internal_param* pParams, s16 *soc_temp);
 
-fe_lla_error_t fe_stid135_isi_scan(struct stv* state, struct fe_sat_isi_struct_t *p_isi_struct);
+fe_lla_error_t fe_stid135_isi_and_modcod_scan(struct stv* state, bool modcod_only);
 
 fe_lla_error_t fe_stid135_get_list_isi(struct stv* state, u8 *p_min_isi, u8 *p_max_isi);
 
@@ -859,6 +859,10 @@ fe_lla_error_t  set_pls_mode_code(struct stv *state, u8 pls_mode, u32 pls_code);
 fe_lla_error_t FE_STiD135_GetFECLock(struct stv* state, u32 TimeOut, BOOL* lock_bool_p);
 fe_lla_error_t fe_stid135_read_hw_matype(struct stv* state, int *matype, u8 *isi_read);
 bool fe_stid135_check_sis_or_mis(u8 matype);
+fe_lla_error_t fe_stid135_get_mod_code(struct stv* state,
+																			 enum fe_sat_modcode *modcode,
+																			 enum fe_sat_frame *frame,
+																			 enum fe_sat_pilots *pilots);
 
 int stid135_spectral_scan_start(struct neumo_dvb_frontend *fe);
 int stid135_spectral_scan_next(struct neumo_dvb_frontend *fe,

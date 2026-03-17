@@ -33,9 +33,9 @@ struct stid135_cfg {
 	u8  ts_mode;
 	u8 num_rf_inputs;
 	s8 rf_inputs[16];
-#define TS_2PAR 0
+#define TS_2PAR 0 //6903x
 #define TS_8SER 1
-#define TS_STFE 2
+#define TS_STFE 2 //6909x
 	int (*set_voltage)(struct i2c_adapter *i2c,
 		enum fe_sec_voltage voltage, u8 rf_in);
 	void (*write_properties) (struct i2c_adapter *i2c,u8 reg, u32 buf);
