@@ -85,6 +85,10 @@ static unsigned int mis;
 module_param(mis,int,0644);
 MODULE_PARM_DESC(mis,"someone search the multi-stream signal lose packets,please turn on it(default:off)");
 
+static int vcm_debug = 0;
+module_param(vcm_debug, int, 0644);
+MODULE_PARM_DESC(vcm_debug, "Dump VCM registers for demod N (1-8), 0=off");
+
 #define vprintk(fmt, arg...)																					\
 	if(stid135_verbose) printk(KERN_DEBUG pr_fmt("%s:%d " fmt),  __func__, __LINE__, ##arg)
 
@@ -1337,6 +1341,18 @@ static int stid135_set_parameters(struct neumo_dvb_frontend* fe)
 			}
 
 	search_params.iq_inversion	= FE_SAT_IQ_AUTO;
+
+	/* Convert DVB API rolloff to chip rolloff and set manual mode if not AUTO */
+	switch(p->rolloff) {
+	case ROLLOFF_35:  search_params.roll_off = FE_SAT_35; search_params.man_rolloff = TRUE; break;
+	case ROLLOFF_25:  search_params.roll_off = FE_SAT_25; search_params.man_rolloff = TRUE; break;
+	case ROLLOFF_20:  search_params.roll_off = FE_SAT_20; search_params.man_rolloff = TRUE; break;
+	case ROLLOFF_15:  search_params.roll_off = FE_SAT_15; search_params.man_rolloff = TRUE; break;
+	case ROLLOFF_10:  search_params.roll_off = FE_SAT_10; search_params.man_rolloff = TRUE; break;
+	case ROLLOFF_5:   search_params.roll_off = FE_SAT_05; search_params.man_rolloff = TRUE; break;
+	default:          search_params.roll_off = FE_SAT_35; search_params.man_rolloff = FALSE; break;
+	}
+
 	search_params.tuner_index_jump	= 0; // ok with narrow band signal
 	//the following is in Mhz despite what the name suggests
 	err = FE_STiD135_GetLoFreqHz(&state->chip->ip, &(search_params.lo_frequency));
@@ -1523,6 +1539,95 @@ static int stid135_set_parameters(struct neumo_dvb_frontend* fe)
 	return err != FE_LLA_NO_ERROR ? -1 : 0;
 }
 
+static void stid135_dump_vcm_registers(struct stv *state)
+{
+	STCHIP_Info_t *hChip = state->chip->ip.handle_demod;
+	enum fe_stid135_demod Demod = state->nr + 1;
+	u32 val;
+	int i;
+
+	printk(KERN_INFO "stid135: === VCM register dump for demod %d ===\n", Demod);
+
+	/* VCM Configuration */
+	ChipGetOneRegister(hChip, (u16)REG_RC8CODEW_DVBSX_DEMOD_DMDSELOBS(Demod), &val);
+	printk(KERN_INFO "  DMDSELOBS=0x%02x (NOVCM_SEL=%d)\n", val, (val >> 3) & 1);
+
+	ChipGetOneRegister(hChip, (u16)REG_RC8CODEW_DVBSX_DEMOD_PLSMSCRAMBB(Demod), &val);
+	printk(KERN_INFO "  PLSMSCRAMBB=0x%02x (EN_ANNEXEM=%d EN_DVBS2EXT=%d EN_DVBS2ORIG=%d)\n",
+		   val, (val >> 6) & 1, (val >> 5) & 1, (val >> 4) & 1);
+
+	ChipGetOneRegister(hChip, (u16)REG_RC8CODEW_DVBSX_DEMOD_NOSCFG(Demod), &val);
+	printk(KERN_INFO "  NOSCFG=0x%02x (DIS_ACMRATIO=%d)\n", val, (val >> 7) & 1);
+
+	/* VCM Status */
+	ChipGetOneRegister(hChip, (u16)REG_RC8CODEW_DVBSX_DEMOD_DSTATUS6(Demod), &val);
+	printk(KERN_INFO "  DSTATUS6=0x%02x (SIGNAL_ANNEXEM=%d)\n", val, (val >> 6) & 3);
+
+	ChipGetOneRegister(hChip, (u16)REG_RC8CODEW_DVBSX_HWARE_TSSTATE1(Demod), &val);
+	printk(KERN_INFO "  TSSTATE1=0x%02x (TSACM_MODE=%d)\n", val, (val >> 1) & 1);
+
+	/* PKTDELIN control */
+	ChipGetOneRegister(hChip, (u16)REG_RC8CODEW_DVBSX_PKTDELIN_PDELCTRL0(Demod), &val);
+	printk(KERN_INFO "  PDELCTRL0=0x%02x\n", val);
+
+	ChipGetOneRegister(hChip, (u16)REG_RC8CODEW_DVBSX_PKTDELIN_PDELCTRL1(Demod), &val);
+	printk(KERN_INFO "  PDELCTRL1=0x%02x (FILTER_EN=%d)\n", val, (val >> 5) & 1);
+
+	ChipGetOneRegister(hChip, (u16)REG_RC8CODEW_DVBSX_PKTDELIN_PDELCTRL2(Demod), &val);
+	printk(KERN_INFO "  PDELCTRL2=0x%02x (FRAME_MODE=%d FORCE_CONTINUOUS=%d)\n",
+		   val, (val >> 6) & 1, (val >> 3) & 1);
+
+	ChipGetOneRegister(hChip, (u16)REG_RC8CODEW_DVBSX_PKTDELIN_PDELCTRL3(Demod), &val);
+	printk(KERN_INFO "  PDELCTRL3=0x%02x (DELACMERR=%d BCHERRCONT=%d CONTFAIL=%d)\n",
+		   val, (val >> 4) & 1, (val >> 3) & 1, (val >> 2) & 1);
+
+	/* PKTDELIN status */
+	ChipGetOneRegister(hChip, (u16)REG_RC8CODEW_DVBSX_PKTDELIN_PDELSTATUS1(Demod), &val);
+	printk(KERN_INFO "  PDELSTATUS1=0x%02x (PKTDELIN_LOCK=%d FIRST_LOCK=%d)\n",
+		   val, (val >> 1) & 1, val & 1);
+
+	ChipGetOneRegister(hChip, (u16)REG_RC8CODEW_DVBSX_PKTDELIN_PDELSTATUS2(Demod), &val);
+	printk(KERN_INFO "  PDELSTATUS2=0x%02x (FRAME_MODCOD=%d)\n", val, val & 0x7f);
+
+	/* MATYPE */
+	ChipGetOneRegister(hChip, (u16)REG_RC8CODEW_DVBSX_PKTDELIN_MATSTR1(Demod), &val);
+	printk(KERN_INFO "  MATSTR1=0x%02x (TSGS=%d SIS/MIS=%d CCM/ACM=%d)\n",
+		   val, (val >> 6) & 3, (val >> 5) & 1, (val >> 4) & 1);
+
+	ChipGetOneRegister(hChip, (u16)REG_RC8CODEW_DVBSX_PKTDELIN_MATSTR0(Demod), &val);
+	printk(KERN_INFO "  MATSTR0=0x%02x (ISI=%d)\n", val, val);
+
+	/* TS output modcod */
+	ChipGetOneRegister(hChip, (u16)REG_RC8CODEW_DVBSX_HWARE_TSMODCOD1(Demod), &val);
+	printk(KERN_INFO "  TSMODCOD1=0x%02x\n", val);
+
+	ChipGetOneRegister(hChip, (u16)REG_RC8CODEW_DVBSX_HWARE_TSMODCOD0(Demod), &val);
+	printk(KERN_INFO "  TSMODCOD0=0x%02x\n", val);
+
+	ChipGetOneRegister(hChip, (u16)REG_RC8CODEW_DVBSX_HWARE_TSHEMCFG(Demod), &val);
+	printk(KERN_INFO "  TSHEMCFG=0x%02x\n", val);
+
+	/* MODCODLST0..F (DVB-S2) */
+	printk(KERN_INFO "  MODCODLST[0-F]:");
+	for (i = 0; i < 16; i++) {
+		u16 reg = (u16)(REG_RC8CODEW_DVBSX_DEMOD_MODCODLST0(Demod) + i);
+		ChipGetOneRegister(hChip, reg, &val);
+		printk(KERN_CONT " %02x", val);
+	}
+	printk(KERN_CONT "\n");
+
+	/* MODCODLS10..1F (DVB-S2X) */
+	printk(KERN_INFO "  MODCODLS1[0-F]:");
+	for (i = 0; i < 16; i++) {
+		u16 reg = (u16)(REG_RC8CODEW_DVBSX_DEMOD_MODCODLS10(Demod) + i);
+		ChipGetOneRegister(hChip, reg, &val);
+		printk(KERN_CONT " %02x", val);
+	}
+	printk(KERN_CONT "\n");
+
+	printk(KERN_INFO "stid135: === end VCM register dump ===\n");
+}
+
 static int stid135_read_status_(struct neumo_dvb_frontend* fe, enum fe_status *status)
 {
 	struct stv *state = fe->demodulator_priv;
@@ -1556,6 +1661,11 @@ static int stid135_read_status_(struct neumo_dvb_frontend* fe, enum fe_status *s
 		*status |= FE_HAS_TIMING_LOCK;
 	if(state->signal_info.has_timedout)
 		*status |= FE_TIMEDOUT;
+
+	if (vcm_debug == state->nr + 1) {
+		stid135_dump_vcm_registers(state);
+		vcm_debug = 0;
+	}
 	if(state->signal_info.out_of_llr) {
 		dprintk("setting FE_OUT_OF_RESOURCES\n");
 		*status |= FE_OUT_OF_RESOURCES;

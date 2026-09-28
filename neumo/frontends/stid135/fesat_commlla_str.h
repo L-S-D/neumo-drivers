@@ -309,10 +309,8 @@ struct fe_sat_search_params {
 	s32 				tuner_index_jump;	/* contains the freq index where the rising or falling edge occurs*/
 
 	u32				lo_frequency;		/* gb! Workaround til RF Frontend implementation		*/
-#ifdef USER2
-		enum fe_sat_rolloff		roll_off;		/* Rolloff factor (0.05, 0.1, 0.2, 0.25 or 0.35)	*/
-		BOOL				man_rolloff;		/* Manual (1) or automatic (0) roll-off detection */
-#endif
+	enum fe_sat_rolloff		roll_off;		/* Rolloff factor (0.05, 0.1, 0.2, 0.25 or 0.35)	*/
+	BOOL				man_rolloff;		/* Manual (1) or automatic (0) roll-off detection */
 	};
 
 

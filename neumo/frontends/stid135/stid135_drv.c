@@ -735,9 +735,7 @@ static fe_lla_error_t fe_stid135_manage_matype_info_raw_bbframe(struct stv* stat
 static fe_lla_error_t fe_stid135_flexclkgen_init(struct fe_stid135_internal_param* pParams);
 static fe_lla_error_t fe_stid135_set_reg_init_values(struct stv* state);
 static fe_lla_error_t fe_stid135_set_reg_values_wb(struct stv* state);
-#ifdef USER2
-static fe_lla_error_t fe_stid135_manage_manual_rolloff(fe_stid135_handle_t handle, enum fe_stid135_demod demod);
-#endif
+static fe_lla_error_t fe_stid135_manage_manual_rolloff(struct stv* state, enum fe_stid135_demod demod);
 bool fe_stid135_check_sis_or_mis(u8 matype);
 fe_lla_error_t fe_stid135_get_mod_code(struct stv* state,
 																			 enum fe_sat_modcode *modcode,
@@ -2597,9 +2595,7 @@ static fe_lla_error_t FE_STiD135_GetDemodLock (struct stv* state, u32 TimeOutUNU
 			}
 			if(timeout >= 40) {// we force to 1 slice number
 				error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_SLICESEL_DEMODFLT_SLICESEL(state->nr+1), slc_min);
-				#ifdef USER2
-					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_SLICESEL_DEMODFLT_SLICESEL(state->nr+1), 4);
-				#endif
+				error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_SLICESEL_DEMODFLT_SLICESEL(state->nr+1), 4);
 			} else {
 				error |= ChipGetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_SLICESEL_DEMODFLT_SLICESEL(state->nr+1), &slc_sel);
 				if((slc_sel < slc_min) || (slc_sel > slc_max)) {
@@ -2817,56 +2813,57 @@ static fe_lla_error_t fe_stid135_set_reg_values_wb(struct stv* state)
 
 	return error;
 }
-#ifdef USER2
 /*****************************************************
 --FUNCTION	::	fe_stid135_manage_manual_rolloff
 --ACTION	::	Manages rolloff value if user knows its value
---PARAMS IN	::	handle -> Frontend handle
+--PARAMS IN	::	state -> demod state
 			demod -> current demod 1 .. 8
 --PARAMS OUT	::	NONE
 --RETURN	::	error
 --***************************************************/
-static fe_lla_error_t fe_stid135_manage_manual_rolloff(struct fe_stid135_internal_param* pParams, enum fe_stid135_demod demod)
+static fe_lla_error_t fe_stid135_manage_manual_rolloff(struct stv* state, enum fe_stid135_demod demod)
 {
 	fe_lla_error_t error = FE_LLA_NO_ERROR;
-	struct fe_stid135_internal_param *pParams = NULL;
 
-	if(handle != NULL) {
-		pParams = (struct fe_stid135_internal_param *) handle;
-
-		switch(pParams->roll_off[demod-1]) {
-			case FE_SAT_05:
-				error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_ROLLOFF_CONTROL(demod), 4);
-			break;
-			case FE_SAT_10:
-				error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_ROLLOFF_CONTROL(demod), 3);
-			break;
-			case FE_SAT_15:
-				error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_ROLLOFF_CONTROL(demod), 5);
-			break;
-			case FE_SAT_20:
-				error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_ROLLOFF_CONTROL(demod), 2);
-			break;
-			case FE_SAT_25:
-				error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_ROLLOFF_CONTROL(demod), 1);
-			break;
-			case FE_SAT_35:
-				error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_ROLLOFF_CONTROL(demod), 0);
-			break;
-			/*TD*/
-			default: /* by default automatic rolloff */
-				error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALS2_ROLLOFF(demod), 0);
-				error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALSX_ROLLOFF(demod), 0);
-
-			break;
-		}
+	switch(state->roll_off) {
+		case FE_SAT_05:
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_ROLLOFF_CONTROL(demod), 4);
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALS2_ROLLOFF(demod), 1);
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALSX_ROLLOFF(demod), 1);
+		break;
+		case FE_SAT_10:
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_ROLLOFF_CONTROL(demod), 3);
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALS2_ROLLOFF(demod), 1);
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALSX_ROLLOFF(demod), 1);
+		break;
+		case FE_SAT_15:
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_ROLLOFF_CONTROL(demod), 5);
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALS2_ROLLOFF(demod), 1);
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALSX_ROLLOFF(demod), 1);
+		break;
+		case FE_SAT_20:
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_ROLLOFF_CONTROL(demod), 2);
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALS2_ROLLOFF(demod), 1);
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALSX_ROLLOFF(demod), 1);
+		break;
+		case FE_SAT_25:
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_ROLLOFF_CONTROL(demod), 1);
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALS2_ROLLOFF(demod), 1);
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALSX_ROLLOFF(demod), 1);
+		break;
+		case FE_SAT_35:
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_ROLLOFF_CONTROL(demod), 0);
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALS2_ROLLOFF(demod), 1);
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALSX_ROLLOFF(demod), 1);
+		break;
+		default: /* by default automatic rolloff */
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALS2_ROLLOFF(demod), 0);
+			error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALSX_ROLLOFF(demod), 0);
+		break;
 	}
-	else
-		error |= FE_LLA_INVALID_HANDLE;
 
 	return error;
 }
-#endif
 /*****************************************************
 --FUNCTION	::	fe_stid135_search
 --ACTION	::	Search for a valid transponder
@@ -2927,7 +2924,6 @@ fe_lla_error_t	fe_stid135_search(struct stv* state,
 	if(error1)
 		dprintk("demod=%d: error=%d\n", state->nr, error1);
 
-#ifdef USER2 //code not active!
 	if(((pSearch->search_algo == FE_SAT_COLD_START) || (pSearch->search_algo == FE_SAT_WARM_START))
 		&& (pSearch->symbol_rate >= pParams->master_clock >> 1)) { /* if SR >= MST_CLK / 2 */
 		error |= (error1=ChipSetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_PKTDELIN_MATCST1(demod), 0x70));
@@ -2940,18 +2936,15 @@ fe_lla_error_t	fe_stid135_search(struct stv* state,
 
 			/* no else part as it is done by set_reg_init_values() function */
 	}
-#endif
 #ifdef ATB
 		error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_ROLLOFF_CONTROL(demod), 2);
 		error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALS2_ROLLOFF(demod), 1);
 		error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_DEMOD_MANUALSX_ROLLOFF(demod), 1);
 	#endif
-#ifdef USER2
-		pParams->roll_off[demod-1] = pSearch->roll_off;
+		state->roll_off = pSearch->roll_off;
 		if(pSearch->man_rolloff == TRUE) {
-			error |= fe_stid135_manage_manual_rolloff(handle, demod);
+			error |= fe_stid135_manage_manual_rolloff(state, demod);
 		}
-#endif
 #ifdef TOTEST //deepthough 20201226 In the main driver this code is disabled
 #else
 		if((pSearch->symbol_rate >= pParams->master_clock) &&
@@ -4241,11 +4234,7 @@ fe_lla_error_t FE_STiD135_Algo(struct stv* state, BOOL satellite_scan, enum fe_s
 					demodTimeout, fecTimeout, state->demod_symbol_rate, state->demod_search_algo
 					);
 #if 1
-#ifdef USER2
-	demodTimeout = demodTimeout * 16; // Low CNR
-#else
 	demodTimeout = demodTimeout * 4;
-#endif
 	fecTimeout   = fecTimeout   * 4;
 #endif
 
@@ -4450,9 +4439,17 @@ fe_lla_error_t FE_STiD135_Algo(struct stv* state, BOOL satellite_scan, enum fe_s
 #endif
 				}
 				else {
+					u32 pdelst1, pdelst2, dstatus6, pdelctrl3;
 					state_dprintk("Returning FE_LLA_SEARCH_FAILED fld_value=0x%x pdel_status_timeout=%d\n", fld_value, pdel_status_timeout);
 					state_dprintk("vit=%d sync=%d timing_lock=%d fec_locked=%d \n", state->signal_info.has_viterbi, state->signal_info.has_sync,
 												state->signal_info.has_timing_lock, state->signal_info.has_lock);
+					/* VCM diagnostic: dump key registers on PKTDELIN failure */
+					ChipGetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_PKTDELIN_PDELSTATUS1(Demod), &pdelst1);
+					ChipGetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_PKTDELIN_PDELSTATUS2(Demod), &pdelst2);
+					ChipGetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_DEMOD_DSTATUS6(Demod), &dstatus6);
+					ChipGetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_PKTDELIN_PDELCTRL3(Demod), &pdelctrl3);
+					printk(KERN_INFO "stid135: demod%d PKTDELIN FAIL: PDELSTATUS1=0x%02x PDELSTATUS2=0x%02x(modcod=%d) DSTATUS6=0x%02x(ANNEXEM=%d) PDELCTRL3=0x%02x\n",
+						   Demod, pdelst1, pdelst2, pdelst2 & 0x7f, dstatus6, (dstatus6 >> 6) & 3, pdelctrl3);
 					return(FE_LLA_SEARCH_FAILED);
 				}
 			}

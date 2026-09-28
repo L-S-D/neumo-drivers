@@ -129,6 +129,9 @@ dep:
 
 install: all uninstall
 	sudo $(MAKE) -C $(KDIR) M=$(PWD) INSTALL_MOD_PATH=$(MDIR) modules_install
+	@echo "Installing neumo DVB headers to /usr/include/linux/dvb/..."
+	sudo cp $(NEUMO_DIR)/include/linux/dvb/neumo-frontend.h /usr/include/linux/dvb/frontend.h
+	sudo cp $(NEUMO_DIR)/include/linux/dvb/neumo-dmx.h /usr/include/linux/dvb/dmx.h
 	@echo "Updating module dependencies..."
 	@if [ -n "$(MDIR)" ]; then \
 		sudo depmod -b "$(MDIR)" -a $(KVER); \
