@@ -325,6 +325,7 @@ struct fe_sat_isi_struct_t
 	u16 matypes[256];
 	s16 default_isi;
 	s16 default_matype;
+	bool is_vcm;
 };
 typedef  struct fe_sat_isi_struct_t  fe_sat_isi_struct;
 

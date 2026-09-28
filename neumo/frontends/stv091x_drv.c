@@ -928,24 +928,33 @@ static int set_pls_mode_code(struct stv *state, u8 pls_mode, u32 pls_code)
 }
 
 //same as stid135
-static int set_stream_index(struct stv *state, int mis)
+static int set_stream_index(struct stv *state, int isi, int pls_mode, int pls_code)
 {
 	u8 tmp;
 
-	if (mis == NO_STREAM_ID_FILTER) {
-		//pr_warn("%s: disable MIS filtering\n", __func__);
-		set_pls_mode_code(state, 0, 1);
+	if (isi == -1) {
+		//pr_warn("%s: disable ISI filtering\n", __func__);
+		set_pls_mode_code(state, pls_code, pls_code);
 		tmp = read_reg(state, RSTV0910_P2_PDELCTRL1 + state->regoff);
 		tmp &= ~0x20;
 		write_reg(state, RSTV0910_P2_PDELCTRL1 + state->regoff, tmp);
+		state->signal_info.isi = -1;
+		state->signal_info.matype = 256;
+		state->signal_info.pls_mode = pls_mode;
+		state->signal_info.pls_code = pls_code;
+		dprintk("SET stream_id=%d pls_code=%d pls_mode=%d",  isi, pls_code, pls_mode);
 	} else {
-		set_pls_mode_code(state, (mis>>26) & 0x3, (mis>>8) & 0x3FFFF);
+		set_pls_mode_code(state, pls_mode, pls_code);
 		tmp = read_reg(state, RSTV0910_P2_PDELCTRL1 + state->regoff);
 		tmp |= 0x20;
 		write_reg(state, RSTV0910_P2_PDELCTRL1 + state->regoff, tmp);
-		//pr_warn("%s: enable MIS filtering - %d\n", __func__, mis & 0xff);
-		write_reg(state, RSTV0910_P2_ISIENTRY + state->regoff, mis & 0xff );
+		//pr_warn("%s: enable ISI filtering - %d\n", __func__, isi & 0xff);
+		write_reg(state, RSTV0910_P2_ISIENTRY + state->regoff, isi & 0xff );
 		write_reg(state, RSTV0910_P2_ISIBITENA + state->regoff, 0xff );
+		state->signal_info.pls_mode = pls_mode;
+		state->signal_info.pls_code = pls_code;
+		state->signal_info.isi = isi;
+		state->signal_info.matype = -2;
 	}
 	return 0;
 }
@@ -1533,7 +1542,9 @@ static int stv091x_isi_scan(struct neumo_dvb_frontend *fe)
 	//restore proper mis
 	if(p->algorithm == ALGORITHM_COLD || p->algorithm == ALGORITHM_COLD_BEST_GUESS) {
 		dprintk("SET_STREAM_INDEX: %d\n", p->stream_id);
-		set_stream_index(state, p->stream_id);
+		int pls_mode = (p->stream_id>>26) & 0x3;
+		int pls_code = (p->stream_id>>8) & 0x3FFFF;
+		set_stream_index(state, p->stream_id, pls_mode, pls_code);
 	}
 	return 0;
 }
@@ -2423,7 +2434,16 @@ static int stv091x_tune_once(struct neumo_dvb_frontend *fe, bool* need_retune)
 			locked = pls_search_range(fe);
 	} else {
 		state->signal_info.has_lock=true;
-		set_stream_index(state, p->stream_id);
+		int pls_mode;
+		int pls_code;
+		if(p->pls_mode >=0) {
+			pls_mode = p->pls_mode;
+			pls_code = p->pls_code;
+		} else if (p->stream_id != -1) {
+			pls_mode = (p->stream_id>>26) & 0x3;
+			pls_code = (p->stream_id>>8) & 0x3FFFF;
+		}
+		set_stream_index(state, p->stream_id, pls_mode, pls_code);
 	}
 
 	state->signal_info.has_timedout = !state->signal_info.has_viterbi;

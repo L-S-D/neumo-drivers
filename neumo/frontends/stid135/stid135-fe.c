@@ -1037,14 +1037,14 @@ static bool pls_search_list(struct neumo_dvb_frontend* fe)
 	int locked = 0;
 	for(i=0; i<p->pls_search_codes_len;++i) {
 		u32 pls_code = p->pls_search_codes[i];
+		u32 pls_mode = (pls_code>>26) & 0x3;
+		pls_code = (pls_code>>8) & 0x3FFFF;
 		s32 pktdelin;
 		u8 timeout = pls_code & 0xff;
 		WARN_ON(i <0 || i>= sizeof(p->pls_search_codes)/sizeof(p->pls_search_codes[0]));
-		state_dprintk("Trying scrambling mode=%d code %d stream_id=%d timeout=%d\n", (pls_code>>26) & 0x3,
-									(pls_code>>8) & 0x3FFFF, p->stream_id, timeout);
-		set_pls_mode_code(state, (pls_code>>26) & 0x3, (pls_code>>8) & 0x3FFFF);
-		//write_reg(state, RSTV0910_P2_DMDISTATE + state->regoff, 0x15);
-		//write_reg(state, RSTV0910_P2_DMDISTATE + state->regoff, 0x18);
+		state_dprintk("Trying scrambling mode=%d code %d stream_id=%d timeout=%d\n", pls_mode, pls_code,
+									p->stream_id, timeout);
+		set_pls_mode_code(state, pls_mode, pls_code);
 		msleep(timeout? timeout: 100); //0 means: use default
 		error = (fe_lla_error_t) ChipGetField(state->chip->ip.handle_demod,
 												FLD_FC8CODEW_DVBSX_PKTDELIN_PDELSTATUS1_PKTDELIN_LOCK(state->nr+1), &pktdelin);
@@ -1054,46 +1054,19 @@ static bool pls_search_list(struct neumo_dvb_frontend* fe)
 
 		if (pktdelin/*packet delineator locked*/) {
 			locked=1;
+			state->demod_search_pls_mode = pls_mode;
+			state->demod_search_pls_code = pls_code;
+			state->signal_info.pls_mode = pls_mode;
+			state->signal_info.pls_code = pls_code;
 			vprintk("PLS LOCKED\n");
 		} else {
 			vprintk("PLS NOT LOCKED\n");
 		}
-		//locked = wait_for_dmdlock(fe, 1 /*require_data*/);
-		//dprintk("RESULT=%d\n", locked);
-			if(locked) {
-#if 0 //cannot work
-				int old_isi = p->stream_id &0xff;
-				error = fe_stid135_read_hw_matype(state, &matype_info, &isi);
-				state->mis_mode = !fe_stid135_check_sis_or_mis(matype_info);
-				state_dprintk("selecting isi=%d old_isi=%d mis_mode=%d stream_id=%d\n", isi,
-											old_isi, state->mis_mode, p->stream_id);
-				if(isi==255)
-					state_dprintk("BUG: isi=255\n");
-				if(signal_info->isi != isi) {
-					state_dprintk("Unexpected: signal_info->isi=%d != isi=%d\n",
-												signal_info->isi, isi);
-					signal_info->isi = isi;
-				}
-#endif
-#if 0 //unreachable
-				if(old_isi <0) {
-					int old_stream_id = p->stream_id;
-					//p->matype = matype_info;
-					if(old_isi != isi)
-						state_dprintk("BUG: isi changed from %d to %d\n", old_isi, isi);
-					p->stream_id = 	(state->mis_mode? (isi&0xff):0xff) | (pls_code & ~0xff);
-					state_dprintk("changed stream_id=%d ols_stream_id=%d mis_mode=%d isi=0x%x pls_code=0x%x / 0x%x ",
-												p->stream_id, old_stream_id,
-												state->mis_mode, isi, state->signal_info.pls_code, pls_code);
-					state->signal_info.pls_code = pls_code;
-					state_dprintk("SET stream_id=0x%x isi=%d\n", p->stream_id, isi);
-				}
-#endif
-				break;
-			}
+		if(locked)
+			break;
 
-			if (kthread_should_stop() || neumo_dvb_frontend_task_should_stop(fe)) {
-				dprintk("exiting on should stop\n");
+		if (kthread_should_stop() || neumo_dvb_frontend_task_should_stop(fe)) {
+			dprintk("exiting on should stop\n");
 			break;
 		}
 
@@ -1126,18 +1099,11 @@ static bool pls_search_range(struct neumo_dvb_frontend* fe)
 	dprintk("pls search range: %d to %d timeout=%d\n",
 					(p->pls_search_range_start) & 0x3FFFF,
 					(p->pls_search_range_end) & 0x3FFFF, timeout);
-#if 0
-	atomic_set(&fe->algo_state.cur_index, 0);
-	atomic_set(&fe->algo_state.max_index, (p->pls_search_range_end - p->pls_search_range_start)>>8);
-#endif
-	for(pls_code=p->pls_search_range_start; pls_code<p->pls_search_range_end; pls_code += 0x100, count++) {
+	for(pls_code=p->pls_search_range_start; pls_code < p->pls_search_range_end; pls_code += 0x100, count++) {
 		s32 pktdelin;
 		if((count+= timeout)>=1000) {
 			vprintk("Trying scrambling mode=%d code %d timeout=%d ...\n",
 							(pls_code>>26) & 0x3, (pls_code>>8) & 0x3FFFF, timeout);
-#if 0
-			atomic_add(count, &fe->algo_state.cur_index);
-#endif
 			count=0;
 		}
 		set_pls_mode_code(state, (pls_code>>26) & 0x3, (pls_code>>8) & 0x3FFFF);
@@ -1150,38 +1116,23 @@ static bool pls_search_range(struct neumo_dvb_frontend* fe)
 		if(error)
 			dprintk("FAILED; error=%d\n", error);
 
-		if (pktdelin /*packet delineator locked*/)
+		if (pktdelin /*packet delineator locked*/) {
 			locked=1;
+			u32 pls_mode = (pls_code>>26) & 0x3;
+			pls_code = (pls_code>>8) & 0x3FFFF;
+			state->demod_search_pls_mode = pls_mode;
+			state->demod_search_pls_code = pls_code;
+			state->signal_info.pls_mode = pls_mode;
+			state->signal_info.pls_code = pls_code;
+		}
 		//locked = wait_for_dmdlock(fe, 0 /*require_data*/);
 		if (kthread_should_stop() || neumo_dvb_frontend_task_should_stop(fe)) {
 			dprintk("exiting on should stop\n");
 			break;
 		}
 		vprintk("PLS RESULT=%d\n", locked);
-		if(locked) {
-#if 0 //cannot work
-			int old_isi = p->stream_id &0xff;
-			error = fe_stid135_read_hw_matype(state, &matype_info, &isi);
-			state->mis_mode= !fe_stid135_check_sis_or_mis(matype_info);
-			dprintk("demod=%d: ISI mis_mode set to %d; selecting stream_id=%d\n", state->nr, state->mis_mode, isi);
-			if(isi==255)
-				state_dprintk("BUG: isi=255\n");
-			if(signal_info->isi != isi) {
-				state_dprintk("Unexpected: signal_info->isi=%d != isi=%d\n",
-											signal_info->isi, isi);
-				signal_info->isi = isi;
-			}
-			if(old_isi != isi)
-					state_dprintk("BUG: isi changed from %d to %d\n", old_isi, isi);
-			p->stream_id = 	(state->mis_mode? (isi&0xff):0xff) | (pls_code & ~0xff);
-			dprintk("demod=%d: ISI mis_mode=%d isi=0x%x pls_code=0x%x / 0x%x stream_id=0x%x", state->nr,
-							state->mis_mode, isi, state->signal_info.pls_code, pls_code, p->stream_id);
-			state->signal_info.pls_code = pls_code;
-		  //p->matype = matype_info;
-			dprintk("PLS SET stream_id=0x%x isi=0x%x\n",p->stream_id, isi);
-#endif
-				break;
-		}
+		if(locked)
+			break;
 	}
 	dprintk("PLS search ended\n");
 	return locked;
@@ -1384,11 +1335,15 @@ static int stid135_set_parameters(struct neumo_dvb_frontend* fe)
 				There could be reasons why  fe_stid135_reset_modcodes_filter is still needed, e.g., when  too strict filters
 				are left from an earlier tune?
 		*/
+		state_dprintk("resetting modcodes_filter\n");
+		state->modcode_filter = false;
 		err |= fe_stid135_reset_modcodes_filter(state);
 		if (err != FE_LLA_NO_ERROR) {
 			dev_err(&state->chip->i2c->dev, "%s: fe_stid135_reset_modcodes_filter error %d !\n", __func__, err);
 			vprintk("[%d]: fe_stid135_reset_modcodes_filter error %d !\n", state->nr+1, err);
 		}
+	} else {
+		state_dprintk("NOT resetting modcodes_filter\n");
 	}
 
 	err |= (error1 = fe_stid135_search(state, &search_params, 0));
@@ -1405,14 +1360,17 @@ static int stid135_set_parameters(struct neumo_dvb_frontend* fe)
 		//print_signal_info(state, "(before trying pls)");
 		vprintk("demod=%d: Trying pls: p->stream_id=%d state->signal_info.isi=0x%x\n", state->nr,
 						p->stream_id, state->signal_info.isi);
-		if(!state->signal_info.fec_locked)
+		if(!state->signal_info.fec_locked) {
 			locked = pls_search_list(fe);
-		if(!state->signal_info.fec_locked && !locked)
+			err |= (error1=fe_stid135_manage_matype_info(state));
+		} if(!state->signal_info.fec_locked && !locked) {
 			locked = pls_search_range(fe);
+			err |= (error1=fe_stid135_manage_matype_info(state));
+		}
 		if(locked) {
 			dprintk("demod=%d: PLS locked=%d\n", state->nr, locked);
 			state_dprintk("Calling isi_scan\n");
-			err = fe_stid135_isi_and_modcod_scan(state, false /*modcod_only*/);
+			err = fe_stid135_isi_and_modcod_scan(state, true /*scan_isi*/, true /*scan_modcod*/);
 			p->pls_mode = state->signal_info.pls_mode;
 			p->pls_code = state->signal_info.pls_code;
 
@@ -1436,7 +1394,8 @@ static int stid135_set_parameters(struct neumo_dvb_frontend* fe)
 	} else {
 		vprintk("now stream_id=0x%x\n", p->stream_id);
 		if(p->stream_id != NO_STREAM_ID_FILTER) {
-			vprintk("calling set_stream_index");
+			vprintk("calling set_stream_index=%d pls_mode=%d pls_code=%d\n",search_params.isi,
+							search_params.pls_mode, search_params.pls_code);
 			set_stream_index(state, search_params.isi, search_params.pls_mode, search_params.pls_code);
 		}
 	}
@@ -1485,13 +1444,14 @@ static int stid135_set_parameters(struct neumo_dvb_frontend* fe)
 	vprintk("[%d] set_parameters: error=%d locked=%d\n", state->nr+1, err, state->signal_info.has_lock);
 
 	/* Set modcode after search */
-	if (p->modcode != MODCODE_ALL) {
-        u32 m = p->modcode;
+	if (p->modcod_filter != MODCODE_ALL) {
+        u32 m = p->modcod_filter;
         u32 j = 0;
 				u32 i;
 				struct fe_sat_dvbs2_mode_t modcode_mask[FE_SAT_MODCODE_UNKNOWN*4];
-        dev_dbg(&state->chip->i2c->dev, "%s: set Modcode mask %x!\n", __func__, p->modcode);
+        dev_dbg(&state->chip->i2c->dev, "%s: set Modcode mask %x!\n", __func__, p->modcod_filter);
         m >>= 1;
+				state_dprintk("XXXX modcode FILTER p->modcode=0x%x\n", p->modcod_filter);
         for (i=FE_SAT_QPSK_14; i < FE_SAT_MODCODE_UNKNOWN; i ++) {
             if (m & 1) {
                 dev_dbg(&state->chip->i2c->dev, "%s: Modcode %02x enabled!\n", __func__, i);
@@ -1736,12 +1696,9 @@ static int stid135_read_status_(struct neumo_dvb_frontend* fe, enum fe_status *s
 	if (err != FE_LLA_NO_ERROR)
 		dev_warn(&state->chip->i2c->dev, "%s: fe_stid135_filter_forbidden_modcodes error %d !\n", __func__, err);
 
-	//update isi list
-	if(state->mis_mode) {
-		vprintk("ISI calling isi_scan\n");
-		err = fe_stid135_isi_and_modcod_scan(state, false/*only modcode*/);
-	} else
-		err = fe_stid135_isi_and_modcod_scan(state, true/*only modcode*/);
+	//update isi and modcod list
+	err = fe_stid135_isi_and_modcod_scan(state, true, true /*scan_modcod*/);
+
 	memcpy(p->isi_bitset, state->signal_info.isi_list.isi_bitset, sizeof(p->isi_bitset));
 	memcpy(p->matypes, state->signal_info.isi_list.matypes, sizeof(p->matypes));
 	const int num_modcods = sizeof(state->signal_info.modcod_list.count)/sizeof(state->signal_info.modcod_list.count[0]);
@@ -1840,7 +1797,7 @@ static int stid135_read_status_(struct neumo_dvb_frontend* fe, enum fe_status *s
 	}
 #endif
 
-	p->modcode = state->signal_info.modcode;
+	p->main_modcod = state->signal_info.modcode;
 	p->pls_mode = state->signal_info.pls_mode;
 	p->pls_code = state->signal_info.pls_code;
 	p->pilot = state->signal_info.pilots == FE_SAT_PILOTS_ON ? PILOT_ON : PILOT_OFF;
@@ -1925,14 +1882,21 @@ static int stid135_set_demux_default_stream_id(struct neumo_dvb_frontend* fe) {
 	struct neumo_dvb_demux * demux = state->demux;
 	bool output_bbframes = false;
 	int ret=0;
-	bool is_dvbs = (p->delivery_system = SYS_DVBS);
+	bool is_dvbs = (p->delivery_system == SYS_DVBS);
 	int stream_id = p->stream_id & 0xff;
 	bool is_dvbs1 = (state->signal_info.standard == FE_SAT_DVBS1_STANDARD);
+#if 0
 	bool is_mis = !is_dvbs && !((state->signal_info.matype >> 5) &0x1);
+#else
+	bool is_mis = !is_dvbs && state->mis_mode;
+#endif
 	bool is_ts = is_dvbs || (((state->signal_info.matype >> 6) &0x3) == 0x3);
-	dprintk("isi=%d/%d is_mis=%d is_ts=%d is_dvbs1=%d\n", state->signal_info.isi, (p->stream_id)&0xff, is_mis, is_ts, is_dvbs1);
+	dprintk("isi=%d/%d  is_dvbs=%d is_dvbs1=%d delsys=%d is_mis=%d is_ts=%d\n", state->signal_info.isi,
+					(p->stream_id)&0xff, is_dvbs, is_dvbs1, p->delivery_system, is_mis, is_ts);
 	if(stream_id==0xff)
 		stream_id = -1;
+	if(stream_id == -1)
+		stream_id = state->signal_info.isi;
 	//only apply bbframes_auto in very specific case of a multi-stream transport stream
 	// DVB-S (DVBS1) does not support BBFrames - always use TS output
 	if (is_dvbs1) {
@@ -1996,7 +1960,9 @@ static int stid135_tune_(struct neumo_dvb_frontend* fe, bool re_tune,
 			 retrieve information about modulation, frequency, symbol_rate
 			 and CNR, BER
 		*/
+#if 0
 		memset(&state->signal_info.isi_list, 0, sizeof(state->signal_info.isi_list));
+#endif
 		fe_stid135_get_signal_info(state);
 		stid135_set_demux_default_stream_id(fe);
 		if(p->output_bbframes) {

@@ -169,6 +169,9 @@ static int dvb_dvr_open(struct inode *inode, struct file *file)
 		dvb_ringbuffer_init(&dmxdev->dvr_buffer, mem, DVR_BUFFER_SIZE);
 		if (dmxdev->may_do_mmap)
 			dvb_vb2_init(&dmxdev->dvr_vb2_ctx, "dvr",
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0))
+									 &dmxdev->mutex,
+#endif
 				     file->f_flags & O_NONBLOCK);
 		dvbdev->readers--;
 	}
@@ -392,13 +395,25 @@ static int dvb_dmxdev_section_callback(const u8 *buffer1, size_t buffer1_len,
 	timer_delete(&dmxdevfilter->timer);
 	dprintk("section callback %*ph\n", 6, buffer1);
 	if (dvb_vb2_is_streaming(&dmxdevfilter->vb2_ctx)) {
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(6,18,15)
 		ret = dvb_vb2_fill_buffer(&dmxdevfilter->vb2_ctx,
 					  buffer1, buffer1_len,
 					  buffer_flags);
 		if (ret == buffer1_len)
 			ret = dvb_vb2_fill_buffer(&dmxdevfilter->vb2_ctx,
-						  buffer2, buffer2_len,
-						  buffer_flags);
+																buffer2, buffer2_len,
+																buffer_flags);
+#else
+		ret = dvb_vb2_fill_buffer(&dmxdevfilter->vb2_ctx,
+															buffer1, buffer1_len,
+															buffer_flags,
+															true /*flush*/);
+		if (ret == buffer1_len)
+			ret = dvb_vb2_fill_buffer(&dmxdevfilter->vb2_ctx,
+																buffer2, buffer2_len,
+																buffer_flags,
+																true /*flush*/);
+#endif
 	} else {
 		ret = dvb_dmxdev_buffer_write(&dmxdevfilter->buffer,
 					      buffer1, buffer1_len);
@@ -448,11 +463,21 @@ static int dvb_dmxdev_ts_callback(const u8 *buffer1, size_t buffer1_len,
 	}
 
 	if (dvb_vb2_is_streaming(ctx)) {
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(6,18,15)
 		ret = dvb_vb2_fill_buffer(ctx, buffer1, buffer1_len,
 					  buffer_flags);
 		if (ret == buffer1_len)
 			ret = dvb_vb2_fill_buffer(ctx, buffer2, buffer2_len,
-						  buffer_flags);
+																buffer_flags);
+#else
+		ret = dvb_vb2_fill_buffer(ctx, buffer1, buffer1_len,
+															buffer_flags,
+															false /*flush*/);
+		if (ret == buffer1_len)
+			ret = dvb_vb2_fill_buffer(ctx, buffer2, buffer2_len,
+																buffer_flags,
+																false /*flush*/);
+#endif
 	} else {
 		if (buffer->error) {
 			spin_unlock(&dmxdevfilter->dev->lock);
@@ -814,7 +839,10 @@ static int dvb_demux_open(struct inode *inode, struct file *file)
 
 	dvb_ringbuffer_init(&dmxdevfilter->buffer, NULL, 8192);
 	dvb_vb2_init(&dmxdevfilter->vb2_ctx, "demux_filter",
-		     file->f_flags & O_NONBLOCK);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0))
+							 &dmxdev->mutex,
+#endif
+							 file->f_flags & O_NONBLOCK);
 	dmxdevfilter->type = DMXDEV_TYPE_NONE;
 	dvb_dmxdev_filter_state_set(dmxdevfilter, DMXDEV_STATE_ALLOCATED);
 	timer_setup(&dmxdevfilter->timer, dvb_dmxdev_filter_timeout, 0);

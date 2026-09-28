@@ -752,7 +752,7 @@ fe_lla_error_t fe_stid135_filter_forbidden_modcodes(struct stv* state,
 
 fe_lla_error_t fe_stid135_get_soc_temperature(struct fe_stid135_internal_param* pParams, s16 *soc_temp);
 
-fe_lla_error_t fe_stid135_isi_and_modcod_scan(struct stv* state, bool modcod_only);
+fe_lla_error_t fe_stid135_isi_and_modcod_scan(struct stv* state, bool scan_isi, bool scan_modcod);
 
 fe_lla_error_t fe_stid135_get_list_isi(struct stv* state, u8 *p_min_isi, u8 *p_max_isi);
 

@@ -1077,7 +1077,7 @@ static int dvb_frontend_clear_cache(struct neumo_dvb_frontend* fe)
 	delsys = c->delivery_system;
 	memset(c, 0, offsetof(struct neumo_dtv_frontend_properties, strength));
 	c->delivery_system = delsys;
-
+	c->modcod_filter = MODCODE_ALL;
 	dev_dbg(fe->dvb->device, "%s: Clearing cache for delivery system %d\n",
 		__func__, c->delivery_system);
 
@@ -1110,7 +1110,7 @@ static int dvb_frontend_clear_cache(struct neumo_dvb_frontend* fe)
 	}
 
 	c->stream_id = NO_STREAM_ID_FILTER;
-	c->modcode = MODCODE_ALL;
+	c->modcod_filter = MODCODE_ALL;
 	c->scrambling_sequence_index = 0;/* default sequence */
 
 	switch (c->delivery_system) {
@@ -1224,7 +1224,8 @@ struct dtv_cmds_h dtv_cmds[] = {
 	_DTV_CMD(DTV_ISDBT_LAYERC_TIME_INTERLEAVING, 1, 0),
 
 	_DTV_CMD(DTV_STREAM_ID, 1, 0),
-	_DTV_CMD(DTV_MODCODE, 1, 0),
+	_DTV_CMD(DTV_MODCOD_FILTER, 1, 0),
+	_DTV_CMD(DTV_MAIN_MODCOD, 1, 0),
 	_DTV_CMD(DTV_MODCOD_LIST, 1, 0),
 	_DTV_CMD(DTV_SCRAMBLING_SEQUENCE_INDEX, 1, 0),
 	_DTV_CMD(DTV_PLS_MODE, 1, 0),
@@ -1658,8 +1659,12 @@ static int neumouapi_dtv_property_process_get(struct neumo_dvb_frontend* fe,
 		break;
 
 	/* Modcode support */
-	case DTV_MODCODE:
-		tvp->u.data = c->modcode;
+	case DTV_MODCOD_FILTER:
+		tvp->u.data = c->modcod_filter;
+		break;
+
+	case DTV_MAIN_MODCOD:
+		tvp->u.data = c->main_modcod;
 		break;
 
 		/* Modcode support */
@@ -1920,8 +1925,12 @@ static int dvbuapi_dtv_property_process_get(struct neumo_dvb_frontend* fe,
 		break;
 
 	/* Modcode support */
-	case DTV_MODCODE:
-		tvp->u.data = c->modcode;
+	case DTV_MODCOD_FILTER:
+		tvp->u.data = c->modcod_filter;
+		break;
+
+	case DTV_MAIN_MODCOD:
+		tvp->u.data = c->main_modcod;
 		break;
 
 	/* Physical layer scrambling support */
@@ -2420,8 +2429,8 @@ static int dtv_property_process_set_int(struct neumo_dvb_frontend* fe,
 		break;
 
     /* Modcode support */
-	case DTV_MODCODE:
-		c->modcode = data;
+	case DTV_MODCOD_FILTER:
+		c->modcod_filter = data;
 		break;
 
 	/* Physical layer scrambling support */
@@ -2735,8 +2744,10 @@ static int dvb_frontend_do_ioctl(struct file *file, unsigned int cmd, void *parg
 	struct dvb_device *dvbdev = file->private_data;
 	struct neumo_dvb_frontend* fe = dvbdev->priv;
 	struct neumo_dvb_frontend_private* fepriv = fe->frontend_priv;
-	dprintk("fepriv=%p\n", fepriv);
+	//dprintk("fepriv=%p\n", fepriv);
+#if 0
 	fe_dprintk(fe, "%s: (%d)\n", __func__, _IOC_NR(cmd));
+#endif
 	if((file->f_flags & O_ACCMODE) != O_RDONLY)  {
 		if(cmd == DTV_STOP) {
 			static struct dtv_algo_ctrl algo_ctrl = {.cmd= DTV_STOP};
@@ -3689,7 +3700,12 @@ static int dvb_frontend_handle_ioctl(struct file *file, unsigned int cmd, void *
 		}
 
 		if (fe->ops.read_status) {
+#if 0
 			err = fe->ops.read_status(fe, status);
+#else
+			err = 0;
+			*status = fepriv->status;
+#endif
 		}
 		break;
 	}

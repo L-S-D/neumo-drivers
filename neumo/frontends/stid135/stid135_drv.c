@@ -1815,7 +1815,8 @@ fe_lla_error_t fe_stid135_get_lock_status(struct stv* state, bool*carrier_lock, 
 													FLD_FC8CODEW_DVBSX_DEMOD_DSTATUS_TMGLOCK_QUALITY(state->nr+1),
 																	&(fld_value[4])));
 		state->signal_info.has_timing_lock =  fld_value[4]&2;
-
+		dprintk("FE_SAT_DVBS2_FOUND fld_values= 0x%x 0x%x 0x%x 0x%x\n", fld_value[0], fld_value[1],
+						fld_value[2], fld_value[4]);
 		if(error1) {
 			state_dprintk("error getting tmglockquality\n");
 		}
@@ -2945,8 +2946,6 @@ fe_lla_error_t	fe_stid135_search(struct stv* state,
 		if(pSearch->man_rolloff == TRUE) {
 			error |= fe_stid135_manage_manual_rolloff(state, demod);
 		}
-#ifdef TOTEST //deepthough 20201226 In the main driver this code is disabled
-#else
 		if((pSearch->symbol_rate >= pParams->master_clock) &&
 			 (state->demod_search_algo == FE_SAT_BLIND_SEARCH ||
 				state->demod_search_algo == FE_SAT_NEXT)
@@ -2995,7 +2994,6 @@ fe_lla_error_t	fe_stid135_search(struct stv* state,
 		if(error1)
 			dprintk("demod=%d: error=%d\n", state->nr, error1);
 	}
-#endif //TOTEST
 
 	//for wideband such as 200Msymbol/s
 	if(pSearch->symbol_rate >= pParams->master_clock) { /* if SR >= MST_CLK */
@@ -3849,22 +3847,27 @@ fe_lla_error_t fe_stid135_get_signal_info(struct stv* state)
 	/* On auxiliary demod, SR found is not true, we have to pick it on master demod  */
 	if(Demod == FE_SAT_DEMOD_2) {
 		error |= ChipGetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_HDEBITCFG2_MODE_HAUTDEBIT(Demod), &(fld_value[0]));
-		dprintk("demod=%d: HAUTDEBIT read=%d\n", state->nr, fld_value[0]);
 		if(fld_value[0] == 3) { //if demod is in aux demod mode
+			dprintk("demod=%d in aux demod mode: HAUTDEBIT read=%d\n", state->nr, fld_value[0]);
 			error |= FE_STiD135_GetCarrierFrequencyOffset_(state->chip->ip.handle_demod, FE_SAT_DEMOD_1, pParams->master_clock, &carrier_frequency);
 			carrier_frequency /= 1000;
 			error |= FE_STiD135_GetSymbolRate_(state->chip->ip.handle_demod, FE_SAT_DEMOD_1, pParams->master_clock, &(pInfo->symbol_rate));
 			error |= FE_STiD135_TimingGetOffset_(state->chip->ip.handle_demod, FE_SAT_DEMOD_1, pInfo->symbol_rate,  &symbolRateOffset);
+		} else {
+			dprintk("demod=%d in regular demod mode: HAUTDEBIT read=%d\n", state->nr, fld_value[0]);
 		}
 	}
 	if(Demod == FE_SAT_DEMOD_4) {
 		error |= ChipGetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_HDEBITCFG2_MODE_HAUTDEBIT(Demod), &(fld_value[0]));
 		dprintk("demod=%d: HAUTDEBIT read=%d\n", state->nr, fld_value[0]);
 		if(fld_value[0] == 3) { //if demod is in aux demod mode
+			dprintk("demod=%d in aux demod mode: HAUTDEBIT read=%d\n", state->nr, fld_value[0]);
 			error |= FE_STiD135_GetCarrierFrequencyOffset_(state->chip->ip.handle_demod, FE_SAT_DEMOD_3, pParams->master_clock,  &carrier_frequency);
 			carrier_frequency /= 1000;
 			error |= FE_STiD135_GetSymbolRate_(state->chip->ip.handle_demod, FE_SAT_DEMOD_3, pParams->master_clock, &(pInfo->symbol_rate));
 			error |= FE_STiD135_TimingGetOffset_(state->chip->ip.handle_demod, FE_SAT_DEMOD_3, pInfo->symbol_rate, &symbolRateOffset);
+		} else {
+			dprintk("demod=%d in regular demod mode: HAUTDEBIT read=%d\n", state->nr, fld_value[0]);
 		}
 	}
 	if(((Demod != FE_SAT_DEMOD_2) && (Demod != FE_SAT_DEMOD_4)) ||
@@ -3897,7 +3900,7 @@ fe_lla_error_t fe_stid135_get_signal_info(struct stv* state)
 																	state->chip->ip.handle_demod, Demod, &(pInfo->standard));
 
 	error |= FE_STiD135_GetViterbiPunctureRate(state, &(pInfo->puncture_rate));
-#if 0
+#if 1
 	for(count=0; count<5;++count) {
 		error |= ChipGetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_TMGOBS_ROLLOFF_STATUS(Demod), &(fld_value[0]));
 		if(pInfo->modcode != FE_SAT_DUMMY_PLF)
@@ -3905,6 +3908,8 @@ fe_lla_error_t fe_stid135_get_signal_info(struct stv* state)
 		state_chip_sleep(state,5);
 	}
 #else
+	if(pInfo->modcode == FE_SAT_DUMMY_PLF)
+		dprintk("modcode=dummy (still) at this point\n");
 	error |= ChipGetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_TMGOBS_ROLLOFF_STATUS(Demod), &(fld_value[0]));
 #endif
 	pInfo->roll_off = (enum fe_sat_rolloff)(fld_value[0]);
@@ -3922,7 +3927,7 @@ fe_lla_error_t fe_stid135_get_signal_info(struct stv* state)
 		pInfo->spectrum = (enum fe_sat_iq_inversion)(fld_value[0]);
 		if(pInfo->modcode == FE_SAT_DUMMY_PLF) {
 			pInfo->modulation = FE_SAT_MOD_DUMMY_PLF;
-			dprintk("state->signal_info.modulation=%d\n", pInfo->modulation);
+			dprintk("state->signal_info.modulation = dummy\n");
 		} else if (((pInfo->modcode >= FE_SAT_QPSK_14) && (pInfo->modcode <= FE_SAT_QPSK_910))
 							 || ((pInfo->modcode >= FE_SAT_DVBS1_QPSK_12) && (pInfo->modcode <= FE_SAT_DVBS1_QPSK_78))
 							 || ((pInfo->modcode >= FE_SATX_QPSK_13_45) && (pInfo->modcode <= FE_SATX_QPSK_11_20))
@@ -3994,13 +3999,12 @@ fe_lla_error_t fe_stid135_get_signal_info(struct stv* state)
 		if(state->mis_mode) {
 			int error1 = FE_LLA_NO_ERROR;
 			//memset(&state->signal_info.isi_list, 0, sizeof(state->signal_info.isi_list));
-			state_dprintk("Calling isi_scan\n");
-			error1 = fe_stid135_isi_and_modcod_scan(state, false/*only modcodes*/);
+			error1 = fe_stid135_isi_and_modcod_scan(state, true, true);
 			state_dprintk("MIS DETECTION: error=%d\n", error1);
 		} else {
 			u8 isi_read;
 			fe_stid135_read_hw_matype(state, &pInfo->matype, &isi_read);
-			error |= fe_stid135_isi_and_modcod_scan(state, true/*modcod_only*/);
+			error |= fe_stid135_isi_and_modcod_scan(state, false, true);
 		}
 
 	} else { /*DVBS1/DSS*/
@@ -4950,7 +4954,9 @@ static  fe_lla_error_t FE_STiD135_GetSignalParams(
 
 	error |=
 		FE_STiD135_GetViterbiPunctureRate(state, &state->signal_info.puncture_rate);
-
+	if(error) {
+		dprintk("Error getting ViterbiPunctureRate\n");
+	}
 	error = error | fe_stid135_get_mod_code(state,
 				&state->signal_info.modcode,
 				&state->signal_info.frame_length,
@@ -5744,10 +5750,11 @@ fe_lla_error_t fe_stid135_manage_matype_info(struct stv* state)
 				dprintk("demod=%d: error=%d\n", state->nr, error1);
 			/* Read Matype */
 			error = (error1 = fe_stid135_read_hw_matype(state, &matype_info, &isi));
-			dprintk("demod=%d: isi=%d matype=%d\n", state->nr, isi, matype_info);
 			genuine_matype = matype_info;
 			state->signal_info.matype = genuine_matype;
+			state->signal_info.isi_list.is_vcm |=  !((genuine_matype >> 4) & 1);
 			state->signal_info.isi = isi;
+			dprintk("demod=%d: isi=%d matype=%d vcm=%d\n", state->nr, isi, matype_info, state->signal_info.isi_list.is_vcm);
 			if(error1)
 				dprintk("demod=%d: error=%d\n", state->nr, error1);
 			/* Check if MIS stream (Multi Input Stream). If yes then set the MIS Filter to get the Min ISI */
@@ -5825,30 +5832,6 @@ fe_lla_error_t fe_stid135_manage_matype_info(struct stv* state)
 			}
 			/* If TS/GS = 10 (GSE-HEM High Efficiency Mode) reset matype force bit, load frames in MPEG packets and disable latency regulation */
 				else if(((genuine_matype>>6) & 0x3) == 0x2){ //GSE-HEM
-#ifdef USER1 //code not used
-				/* Force HEM mode */
-					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_PDELCTRL0_HEMMODE_SELECT(Demod), 3);
-					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_HWARE_TSCFG1_TSFIFO_MANSPEED(Demod), 3);
-					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_HWARE_TSCFG0_TSFIFO_EMBINDVB(Demod), 1); // - new management of NCR
-					/* Adjust TSSPEED according to channel maximum bit rate for the demodulator */
-					error |= ChipGetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_HDEBITCFG0_SDEMAP_MAXLLRRATE(Demod), &fld_value);
-					if(fld_value == 0x00) {
-						error |= ChipSetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_HWARE_TSSPEED(Demod), 0x10); // - new management of NCR
-					} else {
-						error |= ChipSetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_HWARE_TSSPEED(Demod), 0x16); // - new management of NCR
-					}
-					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_HWARE_TSSTATE1_TSOUT_NOSYNC(Demod), 0);
-					/* To avoid reset of stream merger in annexM, ACM or if PID filter is enabled, set pragmatic smoothing mode for computation of TS bit rate */
-					matype_info &= 0x0F;
-					/* Set bit 5 to ignore ISI/MIS bit because not compatible with NCR feature (latency regulation) */
-					matype_info |= 0xB0;
-					error |= ChipSetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_PKTDELIN_MATCST1(Demod), matype_info);
-					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_BBHCTRL2_FORCE_MATYPEMSB(Demod), 1);
-					state_dprintk("force_matypemsb set to 1");
-					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_HWARE_TSCFG0_TSFIFO_BITSPEED(Demod), 1);
-					error |= ChipSetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_HWARE_TSBITRATE1(Demod), 0x80);
-					error |= ChipSetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_HWARE_TSBITRATE0(Demod), 0x00);
-#else
 #ifdef  ENABLE_BBFRAME_FOR_GSE
 					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_PDELCTRL2_FORCE_CONTINUOUS(Demod), 1);
 					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_PDELCTRL2_FRAME_MODE(Demod), 1);
@@ -5877,34 +5860,9 @@ fe_lla_error_t fe_stid135_manage_matype_info(struct stv* state)
 					error |= (error1=ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_PDELCTRL0_HEMMODE_SELECT(Demod), 0));
 					if(error1)
 						dprintk("demod=%d: error=%d\n", state->nr, error1);
-#endif
 			}
 			/* If TS/GS = 00 (Generic packetized) or 01 (Generic continuous) force matype/tsgs = 10 and load frames in MPEG packets */
 			else if((((genuine_matype>>6) & 0x3) == 0x0) || ((genuine_matype>>6) & 0x3) == 0x1) {
-#ifdef USER1 //code not used
-					/* Force HEM mode */
-					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_PDELCTRL0_HEMMODE_SELECT(Demod), 3);
-					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_HWARE_TSCFG1_TSFIFO_MANSPEED(Demod), 3);
-					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_HWARE_TSCFG0_TSFIFO_EMBINDVB(Demod), 1); // - new management of NCR
-					/* Adjust TSSPEED according to channel maximum bit rate for the demodulator */
-					error |= ChipGetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_HDEBITCFG0_SDEMAP_MAXLLRRATE(Demod), &fld_value);
-					if(fld_value == 0x00) {
-						error |= ChipSetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_HWARE_TSSPEED(Demod), 0x10); // - new management of NCR
-					} else {
-						error |= ChipSetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_HWARE_TSSPEED(Demod), 0x16); // - new management of NCR
-					}
-					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_HWARE_TSSTATE1_TSOUT_NOSYNC(Demod), 0);
-					/* To avoid reset of stream merger in annexM, ACM or if PID filter is enabled, set pragmatic smoothing mode for computation of TS bit rate */
-					matype_info &= 0x0F;
-					/* Set bit 5 to ignore ISI/MIS bit because not compatible with NCR feature (latency regulation) */
-					matype_info |= 0xB0;
-					error |= ChipSetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_PKTDELIN_MATCST1(Demod), matype_info);
-					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_BBHCTRL2_FORCE_MATYPEMSB(Demod), 1);
-					state_dprintk("force_matypemsb set to 1");
-					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_HWARE_TSCFG0_TSFIFO_BITSPEED(Demod), 1);
-					error |= ChipSetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_HWARE_TSBITRATE1(Demod), 0x80);
-					error |= ChipSetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_HWARE_TSBITRATE0(Demod), 0x00);
-#else
 #ifdef ENABLE_BBFRAME_FOR_GSE
 					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_PDELCTRL2_FORCE_CONTINUOUS(Demod), 1);
 					error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_PDELCTRL2_FRAME_MODE(Demod), 1);
@@ -5912,6 +5870,7 @@ fe_lla_error_t fe_stid135_manage_matype_info(struct stv* state)
 					//error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_HWARE_TSSYNC_TSFIFO_SYNCMODE(Demod), 2);
 					//error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_HWARE_TSCFG0_TSFIFO_EMBINDVB(Demod), 1); //TEST
 #endif
+#ifdef NO_FORCE_MATYPEMSB
 					matype_info &= 0x0F;
 					/* Set bit 5 to ignore ISI/MIS bit because not compatible with NCR feature (latency regulation) */
 					matype_info |= 0xB0;
@@ -5922,6 +5881,7 @@ fe_lla_error_t fe_stid135_manage_matype_info(struct stv* state)
 					state_dprintk("force_matypemsb set to 1");
 					if(error1)
 						dprintk("demod=%d: error=%d\n", state->nr, error1);
+#endif
 					/* Force HEM mode */
 					error |= (error1=ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_PDELCTRL0_HEMMODE_SELECT(Demod), 3));
 					if(error1)
@@ -5941,7 +5901,6 @@ fe_lla_error_t fe_stid135_manage_matype_info(struct stv* state)
 					if(error1)
 						dprintk("demod=%d: error=%d\n", state->nr, error1);
 					/* To avoid reset of stream merger in annexM, ACM or if PID filter is enabled, set pragmatic smoothing mode for computation of TS bit rate */
-#endif
 			}
 			/* WB, and MIS mode */
 			if ((state->demod_symbol_rate > state->chip->ip.master_clock) && mis) {
@@ -10583,18 +10542,22 @@ fe_lla_error_t fe_stid135_get_isi(struct stv* state, u8 *p_isi_current)
 --PARAMS OUT	::	p_isi_struct -> Struct ISI Nb of ISI and ISI numbers
 --RETURN	::	Error (if any)
 --***************************************************/
-fe_lla_error_t fe_stid135_isi_and_modcod_scan(struct stv* state, bool modcod_only)
+fe_lla_error_t fe_stid135_isi_and_modcod_scan(struct stv* state, bool scan_isi, bool scan_modcod)
 {
 	struct fe_sat_isi_struct_t* p_isi_struct = &state->signal_info.isi_list;
 	struct fe_sat_modcod_struct_t* p_modcod_struct = &state->signal_info.modcod_list;
 	enum fe_stid135_demod demod = state->nr+1;
 	int error = FE_LLA_NO_ERROR;
+	int error1 = FE_LLA_NO_ERROR;
 	u8 CurrentISI;
 	int matype;
 	u8 i;
 	u32 j=0;
 	//struct fe_stid135_internal_param *pParams = (struct fe_stid135_internal_param *)handle;
-
+	if(!state->mis_mode /*&& ! p_isi_struct->is_vcm*/)
+		return 0;
+	dprintk("isi_and_modcod scan; scan_isi=%d scan_modcod=%d/%d\n", scan_isi && state->mis_mode,
+					scan_modcod, scan_modcod && p_isi_struct->is_vcm);
 	if (state->chip->ip.handle_demod->Error) {
 		error=FE_LLA_I2C_ERROR;
 		state_dprintk("chip in error\n");
@@ -10604,18 +10567,20 @@ fe_lla_error_t fe_stid135_isi_and_modcod_scan(struct stv* state, bool modcod_onl
 		error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_TPKTDELIN_TESTBUS_SELECT(demod), 8);
 		/* Setup HW to store Current ISI */
 		error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_PDELCTRL0_ISIOBS_MODE(demod), 0);
-		state_chip_sleep(state, 100);
+		state_chip_sleep(state, 20);
 		/* Get Current ISI and store in struct */
-		for (i=0; i < 40; i++) {
+		for (i=0; i < 10; i++) {
 			uint32_t mask;
-			if(!modcod_only) {
-				error |= fe_stid135_read_hw_matype(state, &matype, &CurrentISI);
+			if(scan_isi && state->mis_mode) {
+				error |= (error1=fe_stid135_read_hw_matype(state, &matype, &CurrentISI));
 				j = CurrentISI/32;
+				p_isi_struct->is_vcm |= !((matype >> 4) & 1);
 				mask = ((uint32_t)1)<< (CurrentISI%32);
 				if( ! (p_isi_struct->isi_bitset[j] & mask)) {
 					state->mis_mode |= !fe_stid135_check_sis_or_mis(matype);
-					state_dprintk("Found new ISI=%d matype=%d error=%d mis=%d\n",  CurrentISI, matype, error, state->mis_mode);
-					if(p_isi_struct->default_isi <0) {
+					state_dprintk("Found new ISI=%d matype=%d error=%d mis=%d error1=%d\n",
+												CurrentISI, matype, error, state->mis_mode, error1);
+					if(p_isi_struct->default_isi < 0) {
 						if(state->mis_mode)  {
 							p_isi_struct->default_isi = CurrentISI;
 							p_isi_struct->default_matype = matype;
@@ -10635,22 +10600,26 @@ fe_lla_error_t fe_stid135_isi_and_modcod_scan(struct stv* state, bool modcod_onl
 #endif
 				}
 			}
-			enum fe_sat_modcode	modcode;
-			enum fe_sat_pilots		pilots;		/* pilots on,off only for DVB-S2			*/
-			enum fe_sat_frame		frame_length;	/* Found frame length only for DVB-S2			*/
-			error |= fe_stid135_get_mod_code(state, &modcode, &frame_length, &pilots);
-			if(modcode < 128) {
-				if (p_modcod_struct->count[modcode] ==0)
-					state_dprintk("new modcode: %d\n", modcode);
-				p_modcod_struct->count[modcode]++;
+			if (scan_modcod && p_isi_struct->is_vcm) {
+				enum fe_sat_modcode	modcode;
+				enum fe_sat_pilots		pilots;		/* pilots on,off only for DVB-S2			*/
+				enum fe_sat_frame		frame_length;	/* Found frame length only for DVB-S2			*/
+				error |= fe_stid135_get_mod_code(state, &modcode, &frame_length, &pilots);
+				if(modcode < 128) {
+					if (p_modcod_struct->count[modcode] ==0)
+						state_dprintk("new modcode: %d\n", modcode);
+					p_modcod_struct->count[modcode]++;
 				p_modcod_struct->totcount++;
+				}
 			}
-
 			state_chip_sleep(state, 10);
 		}
 		// Go back to previous value of test mode
 		error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_TPKTDELIN_TESTBUS_SELECT(demod), 0);
 	}
+
+		dprintk("isi_and_modcod scan; num_matypes=%d\n", p_isi_struct->num_matypes);
+
 	return error;
 }
 
@@ -12971,6 +12940,8 @@ fe_lla_error_t stid135_set_bbframe_output(struct stv* state)
 	error |= ChipSetField(handle, FLD_FC8CODEW_DVBSX_HWARE_TSCFG0_TSFIFO_EMBINDVB(demod), 1);
 	error |= ChipSetField(handle, FLD_FC8CODEW_DVBSX_PKTDELIN_BBHCTRL2_FORCE_MATYPEMSB(demod), 1);
 	state_dprintk("force_matypemsb set to 1");
+	error |= (ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_PDELCTRL2_FRAME_MODE(demod), 1));
+
 	state_dprintk("set BBFRAME mode: error=%d", error);
 	state->signal_info.bbframes_on = true;
 	return error;
