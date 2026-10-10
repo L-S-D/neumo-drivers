@@ -27,12 +27,6 @@ MODULE_PARM_DESC(cimode,
 	"set the ci mode,0=Tuners and CAMs are separated into mulitple adapters, \
 	 1= Tuner and cam in same adapters");
 
-int tbs6909x_i2c_speed = 0;
-module_param(tbs6909x_i2c_speed, int, 0444);
-MODULE_PARM_DESC(tbs6909x_i2c_speed,
-	"Override I2C baud rate for TBS6909X (default:0 - use board default of 9/434kHz). "
-	"Values: 9=434kHz, 39=100kHz, 3=1302kHz");
-
 struct workqueue_struct *tbs_wq;   //sec
 
 #define dprintk(fmt, arg...)																					\
@@ -361,6 +355,9 @@ static int tbsecp3_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ret = tbsecp3_adapters_attach(dev);
 	if (ret < 0)
 		goto err5;
+
+	/* card_mac_address is now known; apply a possible per-card i2c speed override */
+	tbsecp3_i2c_update_speed(dev);
 
 	if((cimode==0)&(dev->info->sec!=0)){
 	    ret = tbsecp3_ci_attach(dev);

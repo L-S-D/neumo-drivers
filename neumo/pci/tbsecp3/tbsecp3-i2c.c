@@ -19,6 +19,119 @@
 #define dprintk(fmt, arg...)																					\
 	printk(KERN_DEBUG pr_fmt("%s:%d " fmt), __func__, __LINE__, ##arg)
 
+/* Module parameters for I2C speed configuration */
+static int i2c_speed = 0;  /* 0 = use card default, otherwise override for all cards */
+module_param(i2c_speed, int, 0644);
+MODULE_PARM_DESC(i2c_speed, "I2C speed for all cards (0=use defaults, 3=1302kHz, 4=977kHz, 9=434kHz, 39=100kHz)");
+
+/* Per-board-type I2C speed overrides (indexed by board_id) */
+#define MAX_BOARD_TYPES 64  /* must be larger than highest TBSECP3_BOARD_* define */
+static int i2c_speed_board[MAX_BOARD_TYPES];
+static int i2c_speed_board_count = 0;
+module_param_array(i2c_speed_board, int, &i2c_speed_board_count, 0644);
+MODULE_PARM_DESC(i2c_speed_board, "Per-board-type I2C speed (indexed by board_id)");
+
+/* Per-card MAC address overrides (format: "mac_addr:speed,mac_addr:speed,...") */
+#define MAX_MAC_OVERRIDES 16
+static char *i2c_speed_mac[MAX_MAC_OVERRIDES];
+static int i2c_speed_mac_count = 0;
+module_param_array(i2c_speed_mac, charp, &i2c_speed_mac_count, 0644);
+MODULE_PARM_DESC(i2c_speed_mac, "Per-card I2C speed by MAC address (format: \"0x1234567890ab:9\")");
+
+struct mac_speed_override {
+	u64 mac;
+	int speed;
+};
+
+static struct mac_speed_override mac_overrides[MAX_MAC_OVERRIDES];
+static int mac_override_count = 0;
+
+/* Parse MAC address overrides from module parameter strings */
+static void parse_mac_overrides(void)
+{
+	int i;
+	u64 mac;
+	int speed;
+	char *endp;
+
+	mac_override_count = 0;
+
+	for (i = 0; i < i2c_speed_mac_count && i < MAX_MAC_OVERRIDES; i++) {
+		if (!i2c_speed_mac[i])
+			continue;
+
+		/* Parse "0x1234567890ab:9" format */
+		mac = simple_strtoull(i2c_speed_mac[i], &endp, 0);
+		if (*endp != ':') {
+			pr_err("tbsecp3: Invalid MAC override format: %s (expected 'mac:speed')\n",
+			       i2c_speed_mac[i]);
+			continue;
+		}
+
+		speed = simple_strtol(endp + 1, NULL, 10);
+		if (speed <= 0) {
+			pr_err("tbsecp3: Invalid speed in MAC override: %s\n", i2c_speed_mac[i]);
+			continue;
+		}
+
+		mac_overrides[mac_override_count].mac = mac;
+		mac_overrides[mac_override_count].speed = speed;
+		pr_info("tbsecp3: MAC override[%d]: 0x%012llx -> speed=%d\n",
+		        mac_override_count, mac, speed);
+		mac_override_count++;
+	}
+}
+
+/* Determine I2C speed for a given card - checks overrides in priority order:
+ * 1. Per-card MAC address override (highest priority)
+ * 2. Per-board-type override
+ * 3. Global i2c_speed parameter
+ * 4. Card default from board info (lowest priority)
+ * The card MAC address is only known after the adapters have been attached,
+ * so the MAC override is applied by tbsecp3_i2c_update_speed().
+ */
+static u32 get_i2c_speed_for_card(struct tbsecp3_dev *dev, const char** source)
+{
+	int i;
+	u16 board_id = dev->info->board_id;
+	u64 mac = dev->card_mac_address;
+	u32 speed;
+
+	/* Priority 1: Check per-card MAC override */
+	for (i = 0; mac != 0 && i < mac_override_count; i++) {
+		if (mac_overrides[i].mac == mac) {
+			*source = "MAC override";
+			return mac_overrides[i].speed;
+		}
+	}
+
+	/* Priority 2: Check per-board-type override */
+	if (board_id < MAX_BOARD_TYPES && board_id < i2c_speed_board_count &&
+			i2c_speed_board[board_id] > 0) {
+		*source = "board override";
+		return i2c_speed_board[board_id];
+	}
+
+	/* Priority 3: Check global override */
+	if (i2c_speed > 0) {
+		*source = "global override";
+		return i2c_speed;
+	}
+
+	/* Priority 4: Use card default */
+	*source = "card default";
+	speed = dev->info->i2c_speed;
+	/* default to 400kbps
+		 i2c_speed in kHz is = 125000/4/baud/2/4
+		 baud = 9:  434kHz
+		 baud = 39: 100.16 kHz
+		 baud = 3:  1302.08 kHz
+	*/
+	if (!speed)
+		speed = 9;
+	return speed;
+}
+
 union tbsecp3_i2c_ctrl {
 	struct {
 		u32 ctrl;
@@ -153,27 +266,51 @@ static void tbsecp3_i2c_unregister(struct tbsecp3_i2c *bus)
 void tbsecp3_i2c_reg_init(struct tbsecp3_dev *dev)
 {
 	int i;
-	u32 baud = dev->info->i2c_speed;
+	const char* source;
+	u32 baud;
 
-	/* default to 400kbps
-		 i2c_speed in kHz is = 125000/4/baud/2/4
-		 baud = 9:  434kHz
-		 baud = 39: 100.16 kHz
-		 baud = 3:  1302.08 kHz
-*/
-	if (!baud)
-		baud = 9;
-
-	if (tbs6909x_i2c_speed > 0 && dev->info->board_id == TBSECP3_BOARD_TBS6909X) {
-		dev_info(&dev->pci_dev->dev, "TBS6909X: overriding i2c_speed from %d to %d\n", baud, tbs6909x_i2c_speed);
-		baud = tbs6909x_i2c_speed;
+	/* Parse MAC overrides once on first call */
+	static bool mac_parsed = false;
+	if (!mac_parsed) {
+		parse_mac_overrides();
+		mac_parsed = true;
 	}
+
+	baud = get_i2c_speed_for_card(dev, &source);
+	dev->i2c_baud = baud;
+	dev_info(&dev->pci_dev->dev, "%s (MAC 0x%012llx) i2c_speed=%u (~%u kHz, %s)\n",
+					 dev->info->short_name, dev->card_mac_address, baud,
+					 125000 / 4 / baud / 2 / 4, source);
 
 	for (i = 0; i < 4; i++) {
 		tbs_write(dev->i2c_bus[i].base, TBSECP3_I2C_BAUD, baud);
 		tbs_read(dev->i2c_bus[i].base, TBSECP3_I2C_STAT);
 		tbs_write(TBSECP3_INT_BASE, TBSECP3_I2C_IE(i), 1);
 	}
+}
+
+/*
+	Re-evaluate the i2c speed after the card MAC address is known (it is read over i2c
+	while attaching the adapters) and apply it if it differs, e.g., due to a MAC override.
+	The bus locks are held so that the speed does not change during a transfer.
+ */
+void tbsecp3_i2c_update_speed(struct tbsecp3_dev *dev)
+{
+	int i;
+	const char* source;
+	u32 baud = get_i2c_speed_for_card(dev, &source);
+
+	if (baud == dev->i2c_baud)
+		return;
+	dev_info(&dev->pci_dev->dev, "%s (MAC 0x%012llx) changing i2c_speed %u -> %u (~%u kHz, %s)\n",
+					 dev->info->short_name, dev->card_mac_address, dev->i2c_baud, baud,
+					 125000 / 4 / baud / 2 / 4, source);
+	for (i = 0; i < 4; i++) {
+		mutex_lock(&dev->i2c_bus[i].lock);
+		tbs_write(dev->i2c_bus[i].base, TBSECP3_I2C_BAUD, baud);
+		mutex_unlock(&dev->i2c_bus[i].lock);
+	}
+	dev->i2c_baud = baud;
 }
 
 int tbsecp3_i2c_init(struct tbsecp3_dev *dev)

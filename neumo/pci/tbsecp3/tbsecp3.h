@@ -259,6 +259,7 @@ struct tbsecp3_dev {
 
 	/* i2c */
 	struct tbsecp3_i2c i2c_bus[TBSECP3_MAX_I2C_BUS];
+	u32 i2c_baud; //currently programmed i2c speed
 	char card_address[64]; //string to uniquely identify the card on the system; typically dev_name(&dev->pci_dev->dev)
 	u64 adapter_mac_address;
 	u64 card_mac_address;
@@ -278,10 +279,8 @@ void tbsecp3_gpio_set_pin(struct tbsecp3_dev *dev,
 extern int tbsecp3_i2c_init(struct tbsecp3_dev *dev);
 extern void tbsecp3_i2c_exit(struct tbsecp3_dev *dev);
 extern void tbsecp3_i2c_reg_init(struct tbsecp3_dev *dev);
+extern void tbsecp3_i2c_update_speed(struct tbsecp3_dev *dev);
 extern void tbsecp3_i2c_remove_clients(struct tbsecp3_adapter *adapter);
-
-/* tbspcie-core.c */
-extern int tbs6909x_i2c_speed;
 
 /* tbspcie-cards.c */
 extern struct tbsecp3_board tbsecp3_boards[];
