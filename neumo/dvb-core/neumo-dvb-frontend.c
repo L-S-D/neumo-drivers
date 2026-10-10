@@ -3422,6 +3422,16 @@ static int dvb_frontend_handle_ioctl(struct file *file, unsigned int cmd, void *
 		}
 		break;
 
+	case FE_AGC_LOCK:
+		if (fe->ops.agc_lock)
+			err = fe->ops.agc_lock(fe);
+		break;
+
+	case FE_AGC_UNLOCK:
+		if (fe->ops.agc_unlock)
+			err = fe->ops.agc_unlock(fe);
+		break;
+
 	case FE_ECP3FW_READ:
 		//printk("FE_ECP3FW_READ *****************");
 		if (fe->ops.spi_read) {

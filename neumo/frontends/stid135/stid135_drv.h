@@ -481,6 +481,10 @@ struct stv {
 
 	bool modcode_filter; //for set the modcode
 	struct kobject* sysfs_kobject;
+
+	/* AGC lock state for unicable blindscan */
+	s32 fft_agc_regs[60];
+	bool fft_agc_locked;
 };
 
 void card_lock_(struct stv* state, const char* func, int line);
@@ -869,6 +873,10 @@ int stid135_spectral_scan_next(struct neumo_dvb_frontend *fe,
 															 s32 *frequency_ret,
 															 s32* symbol_rate_ret);
 //int get_spectrum_scan_fft(struct neumo_dvb_frontend *fe);
+
+/* AGC lock/unlock for unicable blindscan */
+int stid135_agc_lock(struct neumo_dvb_frontend *fe);
+int stid135_agc_unlock(struct neumo_dvb_frontend *fe);
 fe_lla_error_t reserve_llr(struct stv* state, s32 required_llr);
 fe_lla_error_t reserve_llr_for_symbolrate(struct stv* state, s32 symbolrate);
 fe_lla_error_t release_llr(struct stv* state);

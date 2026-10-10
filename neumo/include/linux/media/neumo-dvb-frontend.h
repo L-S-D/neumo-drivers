@@ -505,6 +505,10 @@ struct neumo_dvb_frontend_ops {
 											struct dtv_fe_spectrum* user);
 	int (*constellation_get)(struct neumo_dvb_frontend *fe,
 											struct dtv_fe_constellation* user);
+
+	/* AGC lock/unlock for unicable blindscan - keeps AGC fixed across slices */
+	int (*agc_lock)(struct neumo_dvb_frontend *fe);
+	int (*agc_unlock)(struct neumo_dvb_frontend *fe);
 	bool supports_bbframe_embedding;
 #endif
 	/* get frontend tuning algorithm from the module */

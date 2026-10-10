@@ -3136,6 +3136,9 @@ static struct neumo_dvb_frontend_ops stid135_ops = {
 #endif
 	.constellation_get	= stid135_constellation_get,
 
+	.agc_lock			= stid135_agc_lock,
+	.agc_unlock			= stid135_agc_unlock,
+
 	.eeprom_read			= eeprom_read,
 	.eeprom_write			= eeprom_write,
 	.read_temp			= stid135_read_temp,

@@ -1336,6 +1336,9 @@ struct common_dvb_select_api {
 #define NEUMO_FE_SET_RF_INPUT		   _IOW('o', 185, struct neumo_fe_rf_input_control)
 #define NEUMO_FE_GET_EXTENDED_INFO	 _IOR('o', 186, struct neumo_dvb_frontend_extended_info)
 #define NEUMO_FE_DISEQC_SEND_LONG_MASTER_CMD  _IOW('o', 187, struct neumo_dvb_diseqc_long_master_cmd)
+/* AGC lock/unlock for unicable blindscan - keeps AGC fixed across spectrum slices */
+#define NEUMO_FE_AGC_LOCK		       _IO('o', 188)
+#define NEUMO_FE_AGC_UNLOCK		     _IO('o', 189)
 
 #if defined(__DVB_CORE__) || !defined(__KERNEL__)
 

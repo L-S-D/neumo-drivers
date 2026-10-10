@@ -1132,5 +1132,68 @@ void print_spectrum_scan_state_(struct spectrum_scan_state* ss,
 				 ss->lo_frequency_hz/1000, ss->range, ss->frequency_step);
 };
 
+/*****************************************************
+--FUNCTION	::	stid135_agc_lock
+--ACTION	::	Lock AGC for unicable blindscan - keeps AGC fixed across multiple slices
+--PARAMS IN	::	fe -> dvb frontend
+--PARAMS OUT	::	NONE
+--RETURN	::	0 on success, error code otherwise
+--***************************************************/
+int stid135_agc_lock(struct neumo_dvb_frontend *fe)
+{
+	struct stv *state = fe->demodulator_priv;
+	fe_lla_error_t error = FE_LLA_NO_ERROR;
+	int fft_mode = 5; /* Use mode 5 (256 samples) - doesn't matter for AGC lock */
+
+	if (state->fft_agc_locked) {
+		dprintk("demod=%d: AGC already locked\n", state->nr);
+		return -EBUSY;
+	}
+
+	state_chip_lock(state);
+	error = fe_stid135_init_fft(state, fft_mode, state->fft_agc_regs);
+	state_chip_unlock(state);
+
+	if (error) {
+		dprintk("demod=%d: AGC lock failed: error=%d\n", state->nr, error);
+		return -EIO;
+	}
+
+	state->fft_agc_locked = true;
+	dprintk("demod=%d: AGC locked\n", state->nr);
+	return 0;
+}
+
+/*****************************************************
+--FUNCTION	::	stid135_agc_unlock
+--ACTION	::	Unlock AGC after unicable blindscan - restores automatic AGC
+--PARAMS IN	::	fe -> dvb frontend
+--PARAMS OUT	::	NONE
+--RETURN	::	0 on success, error code otherwise
+--***************************************************/
+int stid135_agc_unlock(struct neumo_dvb_frontend *fe)
+{
+	struct stv *state = fe->demodulator_priv;
+	fe_lla_error_t error = FE_LLA_NO_ERROR;
+
+	if (!state->fft_agc_locked) {
+		dprintk("demod=%d: AGC not locked\n", state->nr);
+		return -EINVAL;
+	}
+
+	state_chip_lock(state);
+	error = fe_stid135_term_fft(state, state->fft_agc_regs);
+	state_chip_unlock(state);
+
+	if (error) {
+		dprintk("demod=%d: AGC unlock failed: error=%d\n", state->nr, error);
+		return -EIO;
+	}
+
+	state->fft_agc_locked = false;
+	dprintk("demod=%d: AGC unlocked\n", state->nr);
+	return 0;
+}
+
 //check for incorrect include files
 #include <media/neumo-check.h>
