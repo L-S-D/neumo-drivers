@@ -1037,10 +1037,10 @@ static bool pls_search_list(struct neumo_dvb_frontend* fe)
 	int locked = 0;
 	for(i=0; i<p->pls_search_codes_len;++i) {
 		u32 pls_code = p->pls_search_codes[i];
+		u8 timeout = pls_code & 0xff; //timeout is in the low byte of the unshifted value
 		u32 pls_mode = (pls_code>>26) & 0x3;
 		pls_code = (pls_code>>8) & 0x3FFFF;
 		s32 pktdelin;
-		u8 timeout = pls_code & 0xff;
 		WARN_ON(i <0 || i>= sizeof(p->pls_search_codes)/sizeof(p->pls_search_codes[0]));
 		state_dprintk("Trying scrambling mode=%d code %d stream_id=%d timeout=%d\n", pls_mode, pls_code,
 									p->stream_id, timeout);
@@ -1053,17 +1053,25 @@ static bool pls_search_list(struct neumo_dvb_frontend* fe)
 
 
 		if (pktdelin/*packet delineator locked*/) {
-			locked=1;
-			state->demod_search_pls_mode = pls_mode;
-			state->demod_search_pls_code = pls_code;
-			state->signal_info.pls_mode = pls_mode;
-			state->signal_info.pls_code = pls_code;
-			vprintk("PLS LOCKED\n");
+			/* Check FEC lock (viterbi) to confirm PLS code is correct.
+			 * PKTDELIN can lock even with wrong PLS code - only FEC lock
+			 * confirms we have the right code. */
+			int fec_locked = 0;
+			FE_STiD135_GetFECLock(state, 200, &fec_locked);
+			if (fec_locked) {
+				locked=1;
+				state->demod_search_pls_mode = pls_mode;
+				state->demod_search_pls_code = pls_code;
+				state->signal_info.pls_mode = pls_mode;
+				state->signal_info.pls_code = pls_code;
+				vprintk("PLS LOCKED with FEC confirmed (mode=%d code=%d)\n", pls_mode, pls_code);
+				break;
+			} else {
+				vprintk("PLS pktdelin locked but FEC failed, trying next code\n");
+			}
 		} else {
 			vprintk("PLS NOT LOCKED\n");
 		}
-		if(locked)
-			break;
 
 		if (kthread_should_stop() || neumo_dvb_frontend_task_should_stop(fe)) {
 			dprintk("exiting on should stop\n");
@@ -1072,10 +1080,7 @@ static bool pls_search_list(struct neumo_dvb_frontend* fe)
 
 	}
 
-	if(locked) {
-		FE_STiD135_GetFECLock(state, 200, &locked);
-		dprintk("FEC LOCK=%d\n", locked);
-	}
+	dprintk("pls_search_list: returning locked=%d\n", locked);
 	return locked;
 }
 
@@ -1117,13 +1122,23 @@ static bool pls_search_range(struct neumo_dvb_frontend* fe)
 			dprintk("FAILED; error=%d\n", error);
 
 		if (pktdelin /*packet delineator locked*/) {
-			locked=1;
-			u32 pls_mode = (pls_code>>26) & 0x3;
-			pls_code = (pls_code>>8) & 0x3FFFF;
-			state->demod_search_pls_mode = pls_mode;
-			state->demod_search_pls_code = pls_code;
-			state->signal_info.pls_mode = pls_mode;
-			state->signal_info.pls_code = pls_code;
+			/* Check FEC lock (viterbi) to confirm PLS code is correct.
+			 * PKTDELIN can lock even with wrong PLS code - only FEC lock
+			 * confirms we have the right code. */
+			int fec_locked = 0;
+			FE_STiD135_GetFECLock(state, 200, &fec_locked);
+			if (fec_locked) {
+				u32 pls_mode = (pls_code>>26) & 0x3;
+				locked=1;
+				pls_code = (pls_code>>8) & 0x3FFFF;
+				state->demod_search_pls_mode = pls_mode;
+				state->demod_search_pls_code = pls_code;
+				state->signal_info.pls_mode = pls_mode;
+				state->signal_info.pls_code = pls_code;
+				vprintk("PLS range LOCKED with FEC confirmed (mode=%d code=%d)\n", pls_mode, pls_code);
+			} else {
+				vprintk("PLS range pktdelin locked but FEC failed, continuing search\n");
+			}
 		}
 		//locked = wait_for_dmdlock(fe, 0 /*require_data*/);
 		if (kthread_should_stop() || neumo_dvb_frontend_task_should_stop(fe)) {
@@ -1354,8 +1369,10 @@ static int stid135_set_parameters(struct neumo_dvb_frontend* fe)
 		dprintk("demod=%d: fe_stid135_search error %d !\n", state->nr, err);
 		return -1;
 	}
-#if 1 //missing in official driver, but only called during blindscan
-	if(!state->signal_info.has_viterbi && p->algorithm != ALGORITHM_WARM && p->algorithm != ALGORITHM_COLD) {
+#if 1 //missing in official driver; called during blindscan or when PLS search list/range provided
+	if(!state->signal_info.has_viterbi &&
+		 ((p->algorithm != ALGORITHM_WARM && p->algorithm != ALGORITHM_COLD) ||
+			p->pls_search_codes_len > 0 || p->pls_search_range_end > 0)) {
 		bool locked=false;
 		//print_signal_info(state, "(before trying pls)");
 		vprintk("demod=%d: Trying pls: p->stream_id=%d state->signal_info.isi=0x%x\n", state->nr,
@@ -2466,6 +2483,13 @@ static int stid135_sleep(struct neumo_dvb_frontend* fe)
 		state_chip_unlock(state);
 		state_dprintk("After unlock\n");
 	}
+
+	/* Clear dtv_property_cache to prevent stale tune on next open */
+	{
+		struct neumo_dtv_frontend_properties *p = &fe->dtv_property_cache;
+		p->frequency = 0;
+	}
+
 	return err != 0 ? -1 : 0;
 }
 

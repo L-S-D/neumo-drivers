@@ -4444,9 +4444,11 @@ fe_lla_error_t FE_STiD135_Algo(struct stv* state, BOOL satellite_scan, enum fe_s
 				}
 				else {
 					u32 pdelst1, pdelst2, dstatus6, pdelctrl3;
+					/* Clear fec_locked so PLS search will be attempted */
+					state->signal_info.fec_locked = 0;
 					state_dprintk("Returning FE_LLA_SEARCH_FAILED fld_value=0x%x pdel_status_timeout=%d\n", fld_value, pdel_status_timeout);
-					state_dprintk("vit=%d sync=%d timing_lock=%d fec_locked=%d \n", state->signal_info.has_viterbi, state->signal_info.has_sync,
-												state->signal_info.has_timing_lock, state->signal_info.has_lock);
+					state_dprintk("vit=%d sync=%d timing_lock=%d has_lock=%d fec_locked=%d\n", state->signal_info.has_viterbi, state->signal_info.has_sync,
+												state->signal_info.has_timing_lock, state->signal_info.has_lock, state->signal_info.fec_locked);
 					/* VCM diagnostic: dump key registers on PKTDELIN failure */
 					ChipGetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_PKTDELIN_PDELSTATUS1(Demod), &pdelst1);
 					ChipGetOneRegister(state->chip->ip.handle_demod, (u16)REG_RC8CODEW_DVBSX_PKTDELIN_PDELSTATUS2(Demod), &pdelst2);
@@ -12014,20 +12016,52 @@ fe_lla_error_t fe_stid135_disable_goldcold(struct stv* state)
 --PARAMS OUT	::	NONE
 --RETURN	::	Error (if any)
 --***************************************************/
+/*****************************************************
+--FUNCTION	::	gold2root
+--ACTION	::	Convert DVB-S2 PLS Gold code to Root code
+--PARAMS IN	::	gold -> Gold code (0 to 262142)
+--PARAMS OUT	::	NONE
+--RETURN	::	Root code
+--DESCRIPTION	::	Uses 18-bit LFSR with polynomial x^18 + x^7 + 1
+			per ETSI EN 302 307. STiD135 hardware Gold mode
+			is buggy, so we convert to Root in software.
+--***************************************************/
+static u32 gold2root(u32 gold)
+{
+	u32 x, g;
+
+	if (gold >= 0x3ffff)
+		gold = 0;
+	for (g = 0, x = 1; g < gold; g++)
+		x = (((x ^ (x >> 7)) & 1) << 17) | (x >> 1);
+	return x;
+}
+
 fe_lla_error_t fe_stid135_set_pls(struct stv* state, u8 mode, u32 code)
 {
 	enum fe_stid135_demod demod = state->nr+1;
 	unsigned error = FE_LLA_NO_ERROR;
+	u8 hw_mode = mode & 0x3;
+	u32 hw_code = code;
 	//struct fe_stid135_internal_param *pParams = &state->chip->ip;
+
+	/* Convert Gold codes to Root codes in software.
+	 * STiD135 hardware Gold mode (PLSCRAMB_MODE=1) is buggy for many codes.
+	 * Using Root mode with converted code works reliably. */
+	if (hw_mode == 1) {
+		hw_code = gold2root(code);
+		hw_mode = 0;
+		dprintk("demod=%d: Converting Gold %u to Root %u\n", state->nr, code, hw_code);
+	}
 
 	if (state->chip->ip.handle_demod->Error) {
 		error = FE_LLA_I2C_ERROR;
 		dprintk("PLS NOT SET\n");
 	}else {
-			ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_PLROOT2_PLSCRAMB_MODE(demod), (mode) & 0x3);
-			ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_PLROOT2_PLSCRAMB_ROOT(demod), (code >> 16) & 0x3);
-			ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_PLROOT1_PLSCRAMB_ROOT(demod), (code >> 8) & 0xFF);
-			ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_PLROOT0_PLSCRAMB_ROOT(demod), code & 0xFF);
+			ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_PLROOT2_PLSCRAMB_MODE(demod), hw_mode);
+			ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_PLROOT2_PLSCRAMB_ROOT(demod), (hw_code >> 16) & 0x3);
+			ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_PLROOT1_PLSCRAMB_ROOT(demod), (hw_code >> 8) & 0xFF);
+			ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_PLROOT0_PLSCRAMB_ROOT(demod), hw_code & 0xFF);
 
 			if (state->chip->ip.handle_demod->Error) /*Check the error at the end of the function*/
 				error = FE_LLA_I2C_ERROR;
