@@ -578,7 +578,7 @@ static inline void* embedded_stream_get_super_class(struct embedded_stream* emb,
 																																	enum neumo_embedded_stream_type t) {
 	if(!emb)
 		return NULL;
-	bool matches = (t == emb->embedded_stream_type || EMBEDDED_STREAM_TYPE_UNKNOWN);
+	bool matches = (t == emb->embedded_stream_type || t == EMBEDDED_STREAM_TYPE_UNKNOWN);
 	switch (emb->embedded_stream_type) {
 	case EMBEDDED_STREAM_TYPE_UNKNOWN:
 	default:

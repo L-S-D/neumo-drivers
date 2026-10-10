@@ -533,22 +533,55 @@ static void	bbframes_stream_init(struct bbframes_stream* bbf,
 	bbframes_stream_reset(bbf);
 }
 
+/* Helper to get the container structure (stid_stream or t2mi_stream) for freeing */
+static inline void* embedded_stream_get_container(struct embedded_stream* emb)
+{
+	if (!emb)
+		return NULL;
+	switch (emb->embedded_stream_type) {
+	case EMBEDDED_STREAM_TYPE_STID:
+		return container_of(emb, struct stid_stream, emb);
+	case EMBEDDED_STREAM_TYPE_T2MI:
+		return container_of(emb, struct t2mi_stream, emb);
+	default:
+		return NULL;
+	}
+}
+
 static void embedded_stream_release_(struct kref *kref)
 {
 	struct embedded_stream* emb = container_of(kref, struct embedded_stream, refcount);
+	/* Save parent_feeds and embedding_pid before any release operations to avoid use-after-free */
+	struct neumo_dvb_demux_feeds* parent_feeds = emb->parent_feeds;
+	struct neumo_dvb_demux* demux = parent_feeds->demux;
+	int embedding_pid = emb->embedding_pid;
+	void* container = embedded_stream_get_container(emb);
 	int bbframes_streams_empty = xa_empty(&emb->bbf_streams);
+	unsigned long flags;
+
 	embedded_stream_dprintk(emb, "refcount has dropped to 0 releasing; "
 					"bbframe_streams:empty=%d\n", bbframes_streams_empty);
 	WARN_ON(!bbframes_streams_empty);
 
-	embedded_stream_dprintk(emb, "before reducing parent_feeds.refcount\n");
-	feeds_dprintk(emb->parent_feeds, "parent_feeds\n");
-	kref_put(&emb->parent_feeds->refcount, dvb_demux_feeds_release_);
+	embedded_stream_dprintk(emb, "erasing: parent_feeds->embedded_streams[%d]\n", embedding_pid);
 
-	embedded_stream_dprintk(emb, "erasing: parent_feeds->bbframe_demuxes[%d]\n", emb->embedding_pid);
-	xa_erase(&emb->parent_feeds->embedded_streams, emb->embedding_pid);
-	dprintk("FREE emb=%p\n", emb);
+	/* Hold spinlock while clearing current_bbf and erasing to synchronize with packet processing */
+	spin_lock_irqsave(&demux->lock, flags);
+	emb->current_bbf = NULL;
+	xa_erase(&parent_feeds->embedded_streams, embedding_pid);
+	spin_unlock_irqrestore(&demux->lock, flags);
+
+	dprintk("FREE emb=%p container=%p\n", emb, container);
 	xa_destroy(&emb->bbf_streams);
+
+	/* All debug output using emb MUST be before kfree since emb is inside container */
+	feeds_dprintk(parent_feeds, "before reducing parent_feeds.refcount\n");
+
+	/* Free the container structure (stid_stream or t2mi_stream) - emb is invalid after this */
+	kfree(container);
+
+	/* Release parent_feeds refcount LAST, after all accesses are done */
+	kref_put(&parent_feeds->refcount, dvb_demux_feeds_release_);
 }
 
 
@@ -561,17 +594,31 @@ static void embedded_stream_release(struct embedded_stream* emb) {
 static void bbframes_stream_release_(struct kref *ref)
 {
 	struct bbframes_stream* bbf = container_of(ref, struct bbframes_stream, refcount);
+	/* Save pointers before any release operations to avoid use-after-free */
 	struct neumo_dvb_demux_feeds* feeds = bbf->feeds;
-	bbf_dprintk(bbf, "erasing bbf=%p for isi=%d in parent=%p\n", bbf, bbf? bbf->isi : -1,
-					bbf->parent_embedded_stream);
+	struct embedded_stream* parent = bbf->parent_embedded_stream;
+	struct neumo_dvb_demux* demux = feeds->demux;
 	int isi = bbf->isi;
+	unsigned long flags;
+
+	bbf_dprintk(bbf, "erasing bbf=%p for isi=%d in parent=%p\n", bbf, isi, parent);
 	if (isi < 0)
 		isi = 256;
-	kref_put(&feeds->refcount,  dvb_demux_feeds_release_);
-	xa_erase(&bbf->parent_embedded_stream->bbf_streams, isi);
+
+	/* Hold spinlock while clearing current_bbf and erasing to synchronize with packet processing */
+	spin_lock_irqsave(&demux->lock, flags);
+	/* Clear direct pointer BEFORE xa_erase - packet processing checks this */
+	if (parent->current_bbf == bbf)
+		parent->current_bbf = NULL;
+	xa_erase(&parent->bbf_streams, isi);
+	spin_unlock_irqrestore(&demux->lock, flags);
+
 	dprintk("FREE bbf=%p\n", bbf);
 	kfree(bbf);
-	dprintk("AFTER FREE bbf=%p\n", bbf);
+
+	/* Release feeds refcount LAST, after all accesses are done */
+	kref_put(&feeds->refcount, dvb_demux_feeds_release_);
+	dprintk("AFTER FREE bbf\n");
 }
 
 static void bbframes_stream_release(struct bbframes_stream* bbf) {
@@ -902,14 +949,15 @@ static inline void neumo_dvb_dmx_swfilter_packet_type(struct neumo_dvb_demux_fee
 
 
 
-static void parse_bbheader(struct bbframes_stream* bbf, bool hem_mode, int isi, const uint8_t* buff)
+static bool parse_bbheader(struct bbframes_stream* bbf, bool hem_mode, int isi, const uint8_t* buff)
 {
 	bbf->hem_mode = hem_mode;
 	bbf->matype = buff[0];
 	bbf->isi = isi;
 	bbf->dfl = (buff[4] <<8) | buff[5];
 	if((bbf->dfl & 0x7) !=0) { //expect multiple of 8 bits
-		dmx_demux_dprintk_nice(bbf, "Expected multiple of 8 bits");
+		dmx_demux_dprintk_nice(bbf, "Invalid DFL: not multiple of 8 bits (0x%x)", bbf->dfl);
+		return false;
 	}
 	bbf->dfl >>=3; //now in bytes
 
@@ -921,7 +969,8 @@ static void parse_bbheader(struct bbframes_stream* bbf, bool hem_mode, int isi, 
 	} else {
 		bbf->upl = (buff[2] << 8) | buff[3];
 		if((bbf->upl & 0x7) !=0) { //expect multiple of 8 bits
-			dmx_demux_dprintk_nice(bbf, "Expected multiple of 8 bits");
+			dmx_demux_dprintk_nice(bbf, "Invalid UPL: not multiple of 8 bits (0x%x)", bbf->upl);
+			return false;
 		}
 		bbf->upl >>=3; //now in bytes
 		bbf->issy = 0;
@@ -931,9 +980,11 @@ static void parse_bbheader(struct bbframes_stream* bbf, bool hem_mode, int isi, 
 
 	bbf->syncd = (buff[7]<<8) | buff[8];
 	if((bbf->syncd & 0x7) != 0) { //expect multiple of 8 bits
-		dmx_demux_dprintk_nice(bbf, "Expected multiple of 8 bits");
+		dmx_demux_dprintk_nice(bbf, "Invalid SYNCD: not multiple of 8 bits (0x%x)", bbf->syncd);
+		return false;
 	}
 	bbf->syncd >>= 3; //now in bytes
+	return true;
 }
 
 static inline uint32_t extend_crc32(struct t2mi_stream* t2mi,  const uint8_t* data, int size) {
@@ -1163,7 +1214,12 @@ static inline bool get_t2mi_bbheader(struct t2mi_stream* t2mi, const uint8_t** p
 		*p = NULL;
 		return true;
 	}
-	parse_bbheader(bbf, hem_mode, isi, buff);
+	if(!parse_bbheader(bbf, hem_mode, isi, buff)) {
+		t2mi_stream_dprintk_nice(t2mi, "Invalid BBHeader, resetting\n");
+		t2mi_stream_reset(t2mi, false /*full_reset*/);
+		*p = NULL;
+		return true;
+	}
 	if(bbf->bbf_payload_bytes_left > t2mi->t2mi_payload_bytes_left) {
 		t2mi_stream_dprintk_nice(t2mi, "Unexpected: bbf->bbf_payload_bytes_lef=%d > "
 														 "t2mi->t2mi_payload_bytes_left=%d\n",
@@ -1236,7 +1292,10 @@ inline static bool get_stid_header(struct stid_stream* stid, const uint8_t** p) 
 		return false;
 	if(!(packet_count == 0xB8 || ! bbf->synced))
 		dmx_demux_dprintk_nice(bbf, "Inplementation error\n");
-	parse_bbheader(bbf, hem_mode, isi, buff);
+	if(!parse_bbheader(bbf, hem_mode, isi, buff)) {
+		bbf->synced = false;
+		return false;
+	}
 	*p += 10;
 	return is_start;
 }
@@ -2201,9 +2260,10 @@ static int dvbdmx_allocate_stid_stream_(struct neumo_dvb_demux* demux,
 		emb = old_emb;
 		stid = embedded_stream_get_super_class(emb, EMBEDDED_STREAM_TYPE_STID);
 		kref_get(&emb->refcount);
-		dprintk("reused stid=%p stid.refcount=%d\n", stid, atomic_read(&stid->emb.refcount.refcount.refs));
+		/* Use emb->refcount since stid can be NULL on type mismatch */
+		dprintk("reused stid=%p emb.refcount=%d\n", stid, atomic_read(&emb->refcount.refcount.refs));
 	} else {
-		dprintk("normal stid=%p stid.refcount=%d\n", stid, atomic_read(&stid->emb.refcount.refcount.refs));
+		dprintk("normal stid=%p emb.refcount=%d\n", stid, atomic_read(&emb->refcount.refcount.refs));
 	}
 	dprintk("here5\n");
 	if(!stid) {
@@ -2940,8 +3000,10 @@ int dvb_demux_set_bbframes_state(struct neumo_dvb_demux* demux, bool embedding_i
 	if (embedding_is_on) {
 		dprintk("calling dvbdmx_allocate_stid_stream_ to set demux->fe_bbframes_stream\n");
 		ret = dvbdmx_allocate_stid_stream_(demux, &demux->fe_bbframes_stream, embedding_pid, default_stream_id, demux->fe_feeds);
-		if(ret<0)
+		if(ret<0) {
+			mutex_unlock(&demux->mutex);
 			return ret;
+		}
 
 		WARN_ON(!demux->fe_bbframes_stream);
 		WARN_ON(!demux->fe_bbframes_stream->feeds);

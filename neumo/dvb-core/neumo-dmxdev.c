@@ -476,6 +476,10 @@ static int dvb_dmxdev_pid_callback(const u8 *buffer1, size_t buffer1_len,
 #endif
 	int ret;
 
+	/* Race condition: callback may fire before priv is set during filter setup */
+	if (!dmxdevfilter)
+		return 0;
+
 	spin_lock(&dmxdevfilter->dev->lock);
 	if (dmxdevfilter->params.pes.output == DMX_OUT_DECODER) {
 		spin_unlock(&dmxdevfilter->dev->lock);
@@ -1186,6 +1190,13 @@ static int dvb_dmxdev_add_stid_stream(struct neumo_dmxdev *dmxdev,
 	int ret;
 	struct neumo_dmx_stid_stream* stid;
 	dmxdev_dprintk(dmxdev, "bbframes_pid=0x%04x isi=%d\n", params->embedding_pid, params->isi);
+
+	/* Re-initialize the feed list if needed (feed is a union, could be corrupted by section filter) */
+	if (dmxdevfilter->feed.dmxdev_feed_list.next == NULL ||
+	    dmxdevfilter->feed.dmxdev_feed_list.prev == NULL) {
+		INIT_LIST_HEAD(&dmxdevfilter->feed.dmxdev_feed_list);
+	}
+
 	stid = kzalloc(sizeof(struct neumo_dmx_stid_stream), GFP_KERNEL);
 	if (stid == NULL)
 		return -ENOMEM;
@@ -1205,6 +1216,13 @@ static int dvb_dmxdev_add_t2mi_stream(struct neumo_dmxdev *dmxdev,
 	struct neumo_dmx_t2mi_stream* t2mi;
 
 	dmxdev_dprintk(dmxdev, "t2mi_pid=0x%04x plp=%d\n", params->embedding_pid, params->plp);
+
+	/* Re-initialize the feed list if needed (feed is a union, could be corrupted by section filter) */
+	if (dmxdevfilter->feed.dmxdev_feed_list.next == NULL ||
+	    dmxdevfilter->feed.dmxdev_feed_list.prev == NULL) {
+		INIT_LIST_HEAD(&dmxdevfilter->feed.dmxdev_feed_list);
+	}
+
 	t2mi = kzalloc(sizeof(struct neumo_dmx_t2mi_stream), GFP_KERNEL);
 	if (t2mi == NULL)
 		return -ENOMEM;
