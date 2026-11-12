@@ -1273,9 +1273,18 @@ static int stid135_set_parameters(struct neumo_dvb_frontend* fe)
 	if(p->pls_mode >=0) {
 		search_params.pls_mode = p->pls_mode;
 		search_params.pls_code = p->pls_code;
-	} else if (p->stream_id != -1) {
+	} else if (p->stream_id != -1 && (p->stream_id & 0x0fffff00)) {
+		/* PLS in bits 8..27 of the stream id */
 		search_params.pls_mode = ((p->stream_id >>26) & 0x3);
 		search_params.pls_code = ((p->stream_id >> 8)  & 0x3FFFF);
+	} else if (p->scrambling_sequence_index) {
+		/* DTV_SCRAMBLING_SEQUENCE_INDEX of the standard API: a gold code */
+		search_params.pls_mode = 1;
+		search_params.pls_code = p->scrambling_sequence_index & 0x3FFFF;
+	} else {
+		/* the default sequence: root 1 */
+		search_params.pls_mode = 0;
+		search_params.pls_code = 1;
 	}
 	state_dprintk("parameters: pls_mode=%d pls_code=%d stream_id=%d\n", search_params.pls_mode,
 								search_params.pls_code, p->stream_id);
