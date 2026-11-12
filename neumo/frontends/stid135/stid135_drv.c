@@ -4407,7 +4407,14 @@ fe_lla_error_t FE_STiD135_Algo(struct stv* state, BOOL satellite_scan, enum fe_s
 				if(error1)
 					dprintk("demod=%d: ERROR=%d\n", state->nr, error1);
 				vprintk("demod=%d: here first_lock=%d\n", state->nr, fld_value);
-				int limit=220;
+				/* The packet delineator locks after a few BBFrames, and these take
+				 * longer on a narrow carrier: 220 ms were often too short there
+				 * (999 kBd QPSK 5/6), the search failed and left the demod locked
+				 * without data. Wait as many symbols as 220 ms are at 5 MBd, at
+				 * most 3 s. */
+				u32 limit = 220;
+				if (state->demod_symbol_rate > 0 && state->demod_symbol_rate < 5000000)
+					limit = min_t(u32, 3000, (220U * 5000000U) / state->demod_symbol_rate);
 				while ((fld_value != TRUE) && (pdel_status_timeout < limit)) {
 					state_chip_sleep(state, 5);
 					pdel_status_timeout += 5;
@@ -4415,10 +4422,6 @@ fe_lla_error_t FE_STiD135_Algo(struct stv* state, BOOL satellite_scan, enum fe_s
 					error |= (error1=ChipGetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_PDELSTATUS1_FIRST_LOCK(Demod), &fld_value));
 					if(error1)
 						dprintk("demod=%d: ERROR=%d\n", state->nr, error1);
-					if((pdel_status_timeout > limit && limit < 880)) {
-							limit = limit*2;
-							state_dprintk("Changing limit to %d\n", limit);
-					}
 				}
 				if(fld_value != 0 && fld_value != 1)
 					state_dprintk("FLD=0x%x\n", fld_value);
@@ -4430,7 +4433,7 @@ fe_lla_error_t FE_STiD135_Algo(struct stv* state, BOOL satellite_scan, enum fe_s
 								pdel_status_timeout);
 				//at this point the packet delineator is locked
 				//state->signal_info.has_viterbi = true;
-				if (pdel_status_timeout < 220) {
+				if (fld_value == TRUE) {
 					// Either we deal with common data: TS-MPEG, GSE, and so on...
 #if 1
 					error |= (error1=fe_stid135_manage_matype_info(state));
@@ -4446,7 +4449,7 @@ fe_lla_error_t FE_STiD135_Algo(struct stv* state, BOOL satellite_scan, enum fe_s
 					u32 pdelst1, pdelst2, dstatus6, pdelctrl3;
 					/* Clear fec_locked so PLS search will be attempted */
 					state->signal_info.fec_locked = 0;
-					state_dprintk("Returning FE_LLA_SEARCH_FAILED fld_value=0x%x pdel_status_timeout=%d\n", fld_value, pdel_status_timeout);
+					state_dprintk("Returning FE_LLA_SEARCH_FAILED fld_value=0x%x pdel_status_timeout=%d limit=%u\n", fld_value, pdel_status_timeout, limit);
 					state_dprintk("vit=%d sync=%d timing_lock=%d has_lock=%d fec_locked=%d\n", state->signal_info.has_viterbi, state->signal_info.has_sync,
 												state->signal_info.has_timing_lock, state->signal_info.has_lock, state->signal_info.fec_locked);
 					/* VCM diagnostic: dump key registers on PKTDELIN failure */
