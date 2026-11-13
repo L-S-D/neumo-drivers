@@ -1021,6 +1021,18 @@ static const uint8_t* bbf_output_ts_bytes(struct neumo_dvb_demux* demux,
 	int n = 0;
 	int num_bytes_to_output = 0;
 	bool ts_packet_complete = false;
+	/*
+	 * Only a transport stream (TS/GS 11) is cut into 188-byte packets. With
+	 * anything else, e.g. a generic continuous stream with UPL 0, or with a
+	 * corrupt index, the loop below drives buff_idx below 0 and the memcpy
+	 * then writes in front of ts->buff, over the stream itself. Skip the bytes.
+	 */
+	if (((bbf->matype >> 6) & 0x3) != 0x3 || bbf->upl != 188 || ts->buff_idx < 0) {
+		dmx_demux_dprintk_nice(bbf, "not a transport stream: matype=0x%x upl=%d buff_idx=%d\n",
+													 bbf->matype, bbf->upl, ts->buff_idx);
+		ts_stream_reset(ts);
+		return p + num_ts_bytes;
+	}
 	if(!ts->synced) {
 		//virtually read the bytes of the first incomplete packet, so that they can be skipped
 		int n = min(bbf->syncd - ts->buff_idx, num_ts_bytes);
@@ -1046,6 +1058,11 @@ static const uint8_t* bbf_output_ts_bytes(struct neumo_dvb_demux* demux,
 	}
 
 	while (num_ts_bytes >0 && ts->buff_idx <= bbf->upl) {
+		if(bbf->bbf_payload_bytes_left <= 0) {
+			/* the data field has ended: the rest is padding */
+			p += num_ts_bytes;
+			break;
+		}
 		if(ts->buff_idx == 0 ) {
 			if(bbf->hem_mode) {
 				ts->buff[0] = 0x47;
@@ -1102,7 +1119,7 @@ static const uint8_t* bbf_output_ts_bytes(struct neumo_dvb_demux* demux,
 			neumo_dvb_dmx_swfilter_packet(demux, &ts->buff[0], bbf->feeds, true);
 			ts->buff_idx = 0;
 		}
-		if(bbf->bbf_payload_bytes_left== 0) {
+		if(bbf->bbf_payload_bytes_left <= 0) {
 			p+= num_ts_bytes;
 			break;
 		}
