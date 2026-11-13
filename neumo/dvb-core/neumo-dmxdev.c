@@ -656,6 +656,7 @@ static int dvb_dmxdev_filter_stop(struct neumo_dmxdev_filter *dmxdevfilter)
 {
 	struct neumo_dmxdev_feed *feed;
 	struct neumo_dmx_demux* dmx_demux;
+	bool released_stream = false;
 
 	if (dmxdevfilter->state < DMXDEV_STATE_GO)
 		return 0;
@@ -698,20 +699,40 @@ static int dvb_dmxdev_filter_stop(struct neumo_dmxdev_filter *dmxdevfilter)
 				struct neumo_dmx_stid_stream* stid = container_of(feed, struct neumo_dmx_stid_stream, f);
 				WARN_ON(!stid);
 				dmxdev_dprintk(dmxdevfilter->dev, "STID: before dvb_dmxdev_stop_bbframes_demux bbs=%p\n", stid->stream);
-				int ret = dmxdevfilter->dev->demux->release_bbf_stream(dmxdevfilter->dev->demux, stid->stream);
-				dmxdev_dprintk(dmxdevfilter->dev, "STID: after dvb_dmxdev_stop_bbframes_demux bbs=%p ret=%d\n", stid->stream, ret);
+				if (stid->stream) {
+					int ret = dmxdevfilter->dev->demux->release_bbf_stream(dmxdevfilter->dev->demux, stid->stream);
+					dmxdev_dprintk(dmxdevfilter->dev, "STID: after dvb_dmxdev_stop_bbframes_demux bbs=%p ret=%d\n", stid->stream, ret);
+				}
+				/* the stream and its feeds may have been freed */
+				stid->stream = NULL;
+				stid->feeds = NULL;
+				released_stream = true;
 			}
 				break;
 			case DMXDEV_FEED_TYPE_T2MI: {
 				struct neumo_dmx_t2mi_stream* t2mi = container_of(feed, struct neumo_dmx_t2mi_stream, f);
 				WARN_ON(!t2mi);
 				dmxdev_dprintk(dmxdevfilter->dev, "T2MI: before dvb_dmxdev_stop_bbframes_demux bbs=%p\n", t2mi->stream);
-				int ret = dmxdevfilter->dev->demux->release_bbf_stream(dmxdevfilter->dev->demux, t2mi->stream);
-				dmxdev_dprintk(dmxdevfilter->dev, "T2MI: after dvb_dmxdev_stop_bbframes_demux bbs=%p ret=%d\n", t2mi->stream, ret);
+				if (t2mi->stream) {
+					int ret = dmxdevfilter->dev->demux->release_bbf_stream(dmxdevfilter->dev->demux, t2mi->stream);
+					dmxdev_dprintk(dmxdevfilter->dev, "T2MI: after dvb_dmxdev_stop_bbframes_demux bbs=%p ret=%d\n", t2mi->stream, ret);
+				}
+				/* the stream and its feeds may have been freed */
+				t2mi->stream = NULL;
+				t2mi->feeds = NULL;
+				released_stream = true;
 			}
 				break;
 			}
 		}
+		/*
+		 * current_feeds pointed to the feeds of the innermost stream released
+		 * above, which may have been freed. A restart (DMX_STOP + DMX_START)
+		 * must not allocate the streams inside it: start again from the default
+		 * (frontend feeds for an stid stream, default feeds for a t2mi stream).
+		 */
+		if (released_stream)
+			dmxdevfilter->current_feeds = NULL;
 		dmxdev_dprintk(dmxdevfilter->dev, "Called demux->release_ts_feed\n");
 		break;
 	default:
@@ -932,6 +953,10 @@ static int dvb_dmxdev_filter_start(struct neumo_dmxdev_filter *filter)
 																											bbs->embedding_pid, bbs->isi, filter->current_feeds);
 
 				dmxdev_dprintk(filter->dev, "setting current_feeds=%p was %p ret=%d\n", bbs->feeds, filter->current_feeds, ret);
+				if (ret < 0) {
+					dvb_dmxdev_filter_stop(filter);
+					return ret;
+				}
 				filter -> current_feeds = bbs->feeds;
 			}
 				break;
@@ -943,6 +968,10 @@ static int dvb_dmxdev_filter_start(struct neumo_dmxdev_filter *filter)
 																											 bbs->embedding_pid, bbs->isi, filter->current_feeds);
 
 				dmxdev_dprintk(filter->dev, "setting current_feeds=%p was %p ret=%d\n", bbs->feeds, filter->current_feeds, ret);
+				if (ret < 0) {
+					dvb_dmxdev_filter_stop(filter);
+					return ret;
+				}
 				filter -> current_feeds = bbs->feeds;
 			}
 				break;
