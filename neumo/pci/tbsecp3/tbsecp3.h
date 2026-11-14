@@ -254,6 +254,7 @@ struct tbsecp3_dev {
 	struct pci_dev *pci_dev;
 	void __iomem *lmmio;
 	bool msi;
+	bool dying; /* set by remove(); the irq handler no longer enables the interrupts */
 
 	/* dvb adapters */
 	struct tbsecp3_adapter adapter[TBSECP3_MAX_ADAPTERS];

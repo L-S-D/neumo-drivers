@@ -136,7 +136,8 @@ static irqreturn_t tbsecp3_irq_handler(int irq, void *dev_id)
 			}
 		}
 	}
-	tbs_write(TBSECP3_INT_BASE, TBSECP3_INT_EN, 1);
+	if (!READ_ONCE(dev->dying))
+		tbs_write(TBSECP3_INT_BASE, TBSECP3_INT_EN, 1);
 	return IRQ_HANDLED;
 }
 
@@ -404,14 +405,28 @@ static void tbsecp3_remove(struct pci_dev *pdev)
 {
 	struct tbsecp3_dev *dev = pci_get_drvdata(pdev);
 
-	/* disable interrupts */
+	/*
+	 * Detach the adapters while the interrupt is still there: the i2c
+	 * transfers of the frontends (their threads put the demods, tuners
+	 * and lnbs to sleep when they are stopped) wait for the i2c interrupt.
+	 * tbsecp3_dvb_exit() stops the dma of each adapter before its demux
+	 * is released.
+	 */
+	tbsecp3_adapters_detach(dev);
+
+	/*
+	 * disable interrupts; a handler that is still running must not
+	 * enable them again behind our back
+	 */
+	WRITE_ONCE(dev->dying, true);
+	synchronize_irq(pdev->irq);
 	tbs_write(TBSECP3_INT_BASE, TBSECP3_INT_EN, 0);
+	tbs_read(TBSECP3_INT_BASE, TBSECP3_INT_EN); /* flush the posted write */
 	free_irq(pdev->irq, dev);
 	if (dev->msi) {
 		pci_disable_msi(pdev);
 		dev->msi = false;
 	}
-	tbsecp3_adapters_detach(dev);
 	tbsecp3_adapters_release(dev);
 	tbsecp3_dma_free(dev);
 	tbsecp3_i2c_exit(dev);
