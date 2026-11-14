@@ -3063,7 +3063,8 @@ static int stid135_constellation_get(struct neumo_dvb_frontend* fe, struct dtv_f
 	int error = 0;
 	struct stv_rf_in_t* rf_in = active_rf_in(state);
 	state_chip_lock(state);
-	if(!rf_in->sec_configured) {
+	//rf_in is NULL as long as the frontend has not reserved a tuner
+	if(rf_in && !rf_in->sec_configured) {
 		state_dprintk("Marking rf_in as configured rf_in=%p old=%d\n", rf_in, rf_in->sec_configured);
 		rf_in->sec_configured = true; //we assume that caller has waited long enough
 
