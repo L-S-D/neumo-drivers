@@ -2809,6 +2809,14 @@ static int stid135_spectrum_start(struct neumo_dvb_frontend* fe,
 	}
 	s->scale =  FE_SCALE_DECIBEL; //in units of 0.001dB
 
+	if(!rf_in) {
+		//no tuner reserved: neither FE_SET_RF_INPUT nor a tune came before
+		state_dprintk("No active rf_in: cannot scan\n");
+		s->num_freq = 0;
+		*status =  FE_TIMEDOUT|FE_HAS_SIGNAL|FE_HAS_CARRIER|FE_HAS_VITERBI|FE_HAS_SYNC|FE_HAS_LOCK;
+		return -EINVAL;
+	}
+
 	state_chip_lock(state);
 	state_dprintk("Marking rf_in as configured old=%d\n", rf_in->sec_configured);
 	rf_in->sec_configured = true; //we assume that caller has waited long enough
