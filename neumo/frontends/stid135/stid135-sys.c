@@ -125,7 +125,7 @@ static ssize_t registers_read_(STCHIP_Info_t* hChipHandle, char*buf, loff_t offs
     return ret;
 }
 
-static ssize_t registers_read(STCHIP_Info_t* hChipHandle, char*buf, loff_t offset, size_t len)
+static ssize_t registers_read_range(STCHIP_Info_t* hChipHandle, char*buf, loff_t offset, size_t len)
 {
 		const ssize_t reg_size = sizeof(STCHIP_Register_t);
 		ssize_t ret=0;
@@ -171,9 +171,29 @@ static ssize_t registers_read(STCHIP_Info_t* hChipHandle, char*buf, loff_t offse
 		return ret;
 }
 
+/*
+	The handle is shared by all demods of the chip, which may be in the middle of
+	a register sequence (e.g., sleeping with the chip mutex released). A debug
+	access must neither be skipped because of their error state nor leave its own
+	error, or the index of a register that does not exist, behind for them.
+ */
+static ssize_t registers_read(STCHIP_Info_t* hChipHandle, char*buf, loff_t offset, size_t len)
+{
+	int error = hChipHandle->Error;
+	s32 last_reg_index = hChipHandle->LastRegIndex;
+	ssize_t ret;
+	hChipHandle->Error = CHIPERR_NO_ERROR;
+	ret = registers_read_range(hChipHandle, buf, offset, len);
+	hChipHandle->Error = error;
+	hChipHandle->LastRegIndex = last_reg_index;
+	return ret;
+}
+
 static ssize_t registers_write(STCHIP_Info_t* hChipHandle, const char __user *buf, size_t len) {
 	char kbuf[128];
 	STCHIP_Register_t* regdesc = (void*) & kbuf[0];
+	int error = hChipHandle->Error;
+	s32 last_reg_index = hChipHandle->LastRegIndex;
 	//dprintk("Request of size %ld buf=%p\n", len, buf);
 	if(len != sizeof(STCHIP_Register_t)) {
 		dprintk("Incorrect len: %ld\n", len);
@@ -183,6 +203,8 @@ static ssize_t registers_write(STCHIP_Info_t* hChipHandle, const char __user *bu
 	memcpy(kbuf, buf, len);
 	//dprintk("Asked to set %d-byte register 0x%04x to value 0x%08x ret=%d\n", regdesc->Size, regdesc->Addr, regdesc->Value, ret);
 	ChipSetOneRegister(hChipHandle, regdesc->Addr, regdesc->Value);
+	hChipHandle->Error = error;
+	hChipHandle->LastRegIndex = last_reg_index;
 	return len;
 }
 
