@@ -2140,15 +2140,20 @@ static int stid135_set_voltage(struct neumo_dvb_frontend* fe, enum fe_sec_voltag
 	if(!state->is_master && (rf_in->unicable_mode && voltage !=  SEC_VOLTAGE_OFF))
 		 state_dprintk("Allowing sklave to change voltage for unicable signalling");
 	if(state->chip->set_voltage) {
-		int old_voltage = rf_in->voltage;
-		bool voltage_was_on = (old_voltage != SEC_VOLTAGE_OFF);
+		int old_voltage;
+		bool voltage_was_on;
 		bool voltage_is_on = (voltage != SEC_VOLTAGE_OFF);
 
+		card_lock(state); //DeepThought: maybe not needed (as it does not use stid135 chips)
+		/* test and set under the card lock: otherwise two demods sending unicable
+		 * commands can both find 13V and both raise it to 18V */
+		old_voltage = rf_in->voltage;
+		voltage_was_on = (old_voltage != SEC_VOLTAGE_OFF);
 		if(rf_in->unicable_mode && old_voltage == SEC_VOLTAGE_18 && voltage == SEC_VOLTAGE_18) {
+			card_unlock(state);
 			state_dprintk("Unicable command in progress; retry later");
 			return FE_UNICABLE_DISEQC_RETRY;
 		}
-		card_lock(state); //DeepThought: maybe not needed (as it does not use stid135 chips)
 		if(rf_in->reservation.use_count >1 && ! state->legacy_rf_in) {
 			card_unlock(state);
 			state_dprintk("SKIPPING set_voltage voltage=%s on=%d/%d "
