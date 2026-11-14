@@ -868,8 +868,12 @@ static int dvb_dmxdev_filter_start(struct neumo_dmxdev_filter *filter)
 
 		ret = (*secfeed)->allocate_section_filter(*secfeed, secfilter);
 		if (ret < 0) {
+			/*
+			 * restarts the feed for the other filters on this pid, or
+			 * releases it if there are none
+			 */
 			dvb_dmxdev_feed_restart(filter);
-			filter->feed.sec->start_section_filtering(*secfeed);
+			*secfeed = NULL;
 			dmxdev_dprintk(filter->dev, "could not get filter\n");
 			return ret;
 		}
