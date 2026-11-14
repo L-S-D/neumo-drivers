@@ -10610,6 +10610,15 @@ fe_lla_error_t fe_stid135_isi_and_modcod_scan(struct stv* state, bool scan_isi, 
 				if(modcode < 128) {
 					if (p_modcod_struct->count[modcode] ==0)
 						state_dprintk("new modcode: %d\n", modcode);
+					if (p_modcod_struct->count[modcode] == U16_MAX) {
+						/* the u16 count would wrap: halve all counts, which keeps their shares */
+						int k;
+						p_modcod_struct->totcount = 0;
+						for (k = 0; k < ARRAY_SIZE(p_modcod_struct->count); k++) {
+							p_modcod_struct->count[k] /= 2;
+							p_modcod_struct->totcount += p_modcod_struct->count[k];
+						}
+					}
 					p_modcod_struct->count[modcode]++;
 				p_modcod_struct->totcount++;
 				}
