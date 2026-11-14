@@ -2385,6 +2385,7 @@ static int stid135_recv_slave_reply(struct neumo_dvb_frontend* fe,
 		state_chip_unlock(state);
 	} else {
 		card_unlock(state); //we do not need lock anymore, and it prevents chip_sleep
+		reply->msg_len = sizeof(reply->msg);
 		err = fe_stid135_diseqc_receive(&state->chip->ip, reply->msg, &reply->msg_len);
 		state_dprintk("received %d bytes:", reply->msg_len);
 		state_chip_unlock(state);

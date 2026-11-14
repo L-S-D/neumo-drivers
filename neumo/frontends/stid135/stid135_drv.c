@@ -6535,6 +6535,7 @@ fe_lla_error_t fe_stid135_diseqc_send(struct stv* state,
 --FUNCTION	::	fe_stid135_diseqc_receive
 --ACTION	::	Read received bytes from DiseqC FIFO
 --PARAMS IN	::	handle -> Front End Handle
+		::	NbData -> Size of Data.
 --PARAMS OUT	::	Data -> Table of received bytes.
 		::	NbData -> Number of received bytes.
 --RETURN	::	Error (if any)
@@ -6547,6 +6548,7 @@ fe_lla_error_t fe_stid135_diseqc_receive(struct fe_stid135_internal_param* pPara
 	u32 i=0;
 	u32 reg_value;
 	s32 fld_value;
+	u8 size = *nbdata;
 
 	//pParams = (struct fe_stid135_internal_param*) handle;
 		if(pParams->handle_demod->Error)
@@ -6557,13 +6559,17 @@ fe_lla_error_t fe_stid135_diseqc_receive(struct fe_stid135_internal_param* pPara
 			// Only the DiSEqC1 block has an Rx interface allowing full DiSEqC 2.x operation on this
 			// interface, the three other blocks do not have receiver interfaces implemented.
 			error |= ChipGetField(pParams->handle_demod, FLD_FC8CODEW_DVBSX_DISEQC_DISRXSTAT1_RXEND(AFE_TUNER1), &fld_value);
-			if(fld_value) {
+			if(fld_value && !pParams->handle_demod->Error) {
 				error |= ChipGetField(pParams->handle_demod, FLD_FC8CODEW_DVBSX_DISEQC_DISRXBYTES_RXFIFO_BYTES(AFE_TUNER1), &fld_value);
-				*nbdata = (u8)fld_value;
-				for(i = 0;i < (*nbdata);i++)
+				if (pParams->handle_demod->Error)
+					fld_value = 0;
+				/* The FIFO can hold up to 31 bytes, more than fit into data:
+				 * read them all to empty it, but keep only the first ones */
+				for(i = 0;i < (u32)fld_value;i++)
 				{
 					error |= ChipGetOneRegister(pParams->handle_demod, (u16)REG_RC8CODEW_DVBSX_DISEQC_DISRXFIFO(AFE_TUNER1), &reg_value);
-					data[i] = (u8)reg_value;
+					if (*nbdata < size)
+						data[(*nbdata)++] = (u8)reg_value;
 				}
 			}
 			if (pParams->handle_demod->Error) /*Check the error at the end of the function*/
