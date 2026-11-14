@@ -2622,7 +2622,8 @@ static int stid135_get_spectrum_scan_sweep(struct neumo_dvb_frontend* fe,
 	struct neumo_dtv_frontend_properties *p = &fe->dtv_property_cache;
 	//int rf_in = active_rf_in(state);
 	struct fe_stid135_internal_param * pParams = (struct fe_stid135_internal_param *) &state->chip->ip;
-	s32 lo_frequency;
+	u32 lo_frequency_mhz = 0;
+	s64 lo_frequency; //in Hz
 	int error = FE_LLA_NO_ERROR;
 	int error1 = FE_LLA_NO_ERROR;
 	s32 pband_rf;
@@ -2635,13 +2636,35 @@ static int stid135_get_spectrum_scan_sweep(struct neumo_dvb_frontend* fe,
 	uint32_t frequency;
 	uint32_t resolution =  (p->scan_resolution>0) ? p->scan_resolution : p->symbol_rate/1000; //in kHz
 	uint32_t bandwidth =  (p->symbol_rate>0) ? p->symbol_rate : p->scan_resolution*1000; //in Hz
-	ss->spectrum_len = (end_frequency - start_frequency + resolution-1)/resolution;
-	ss->freq = kzalloc(ss->spectrum_len * (sizeof(ss->freq[0])), GFP_KERNEL);
-	ss->spectrum = kzalloc(ss->spectrum_len * (sizeof(ss->spectrum[0])), GFP_KERNEL);
+	u64 spectrum_len;
+	//after DTV_CLEAR both scan_resolution and symbol_rate are 0
+	if (resolution == 0 || end_frequency <= start_frequency) {
+		state_dprintk("Bad spectrum parameters: range=[%d,%d]kHz resolution=%dkHz\n",
+									start_frequency, end_frequency, resolution);
+		goto __onerror;
+	}
+	spectrum_len = div_u64((u64)(end_frequency - start_frequency) + resolution-1, resolution);
+	if (spectrum_len > STID135_MAX_SPECTRUM_LEN) {
+		state_dprintk("Too many spectrum points: range=[%d,%d]kHz resolution=%dkHz\n",
+									start_frequency, end_frequency, resolution);
+		goto __onerror;
+	}
+	ss->spectrum_len = spectrum_len;
+	ss->freq = kvcalloc(ss->spectrum_len, sizeof(ss->freq[0]), GFP_KERNEL);
+	ss->spectrum = kvcalloc(ss->spectrum_len, sizeof(ss->spectrum[0]), GFP_KERNEL);
 	if (!ss->freq || !ss->spectrum) {
+		*status =  FE_TIMEDOUT|FE_HAS_SIGNAL|FE_HAS_CARRIER|FE_HAS_VITERBI|FE_HAS_SYNC|FE_HAS_LOCK;
 		return  -ENOMEM;
 	}
 	ss->spectrum_present = true;
+
+	//the chip refers frequencies to the LO, as the FFT scan does
+	error |= (error1=FE_STiD135_GetLoFreqHz(pParams, &lo_frequency_mhz));
+	if(error1) {
+		dprintk("Failed: err=%d\n", error1);
+		goto __onerror;
+	}
+	lo_frequency = (s64)lo_frequency_mhz * 1000000;
 
 #ifdef TODO
 	state->tuner_bw = stv091x_bandwidth(ROLLOFF_AUTO, bandwidth);
@@ -2715,7 +2738,7 @@ static int stid135_get_spectrum_scan_sweep(struct neumo_dvb_frontend* fe,
 
 		//Set frequency with minimal register changes
 		{
-			s32 frequency_hz =  (s32)frequency*1000 -  lo_frequency;
+			s32 frequency_hz =  (s32)((s64)frequency*1000 -  lo_frequency); //from -600 to 600 MHz
 			s32 si_register;
 			int demod = state->nr +1;
 			const u16 cfr_factor = 6711; // 6711 = 2^20/(10^6/2^6)*100
@@ -2767,12 +2790,10 @@ static int stid135_stop_task(struct neumo_dvb_frontend* fe)
 	struct spectrum_scan_state* ss = &state->spectrum_scan_state;
 	struct constellation_scan_state* cs = &state->constellation_scan_state;
 
-	if(ss->freq)
-		kfree(ss->freq);
+	kvfree(ss->freq);
 	if(ss->candidates)
 		kfree(ss->candidates);
-	if(ss->spectrum)
-		kfree(ss->spectrum);
+	kvfree(ss->spectrum);
 	if(cs->samples)
 		kfree(cs->samples);
 	memset(ss, 0, sizeof(*ss));

@@ -273,6 +273,9 @@ struct fe_stid135_internal_param {
 #define FE_MAX_SLICE_NUM 256
 #define SQUAREWAVE_FREQUENCY PLL_FVCO_FREQUENCY*100000/13*10/2 // 238461538 if LOF=6200MHz
 
+/* maximum number of points of a spectrum: 950-2150 MHz in steps of about 1.1 kHz */
+#define STID135_MAX_SPECTRUM_LEN (1<<20)
+
 struct fe_stid135_slice_list {
 	u16 max_index;
 	struct fe_sat_slice t_slice[FE_MAX_SLICE_NUM];
