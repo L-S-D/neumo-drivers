@@ -89,13 +89,16 @@ static struct bin_attribute stv_chip_sysfs_registers_vglna_attributes[] = {
 static ssize_t registers_read_(STCHIP_Info_t* hChipHandle, char*buf, loff_t offset, size_t len)
 {
     ssize_t ret=0;
-		int first = offset/sizeof(STCHIP_Register_t);
+		int first;
 		int last;
-		int num_regs= len/sizeof(STCHIP_Register_t);
+		int num_regs;
 		int num_bytes;
 		int idx;
-		if(num_regs + first > hChipHandle->NbRegs)
-			num_regs = hChipHandle->NbRegs - first;
+		/* check the 64 bit offset before it becomes an int register index */
+		if(offset < 0 || offset/sizeof(STCHIP_Register_t) >= hChipHandle->NbRegs)
+			return 0;
+		first = offset/sizeof(STCHIP_Register_t);
+		num_regs = min_t(size_t, len/sizeof(STCHIP_Register_t), hChipHandle->NbRegs - first);
 		last = first + num_regs;
 		dprintk("read: handle=%p offset=%lld first=%d num_regs=%d/%d s=%ld\n", hChipHandle, offset, first, num_regs,  hChipHandle->NbRegs,
 						sizeof(STCHIP_Register_t));
@@ -124,42 +127,47 @@ static ssize_t registers_read_(STCHIP_Info_t* hChipHandle, char*buf, loff_t offs
 
 static ssize_t registers_read(STCHIP_Info_t* hChipHandle, char*buf, loff_t offset, size_t len)
 {
-    ssize_t ret=0;
-		//ssize_t ret1=0;
-		int x = offset % sizeof(STCHIP_Register_t);
-		int len1 = sizeof(STCHIP_Register_t) -x;
-		int ret1=0;
+		const ssize_t reg_size = sizeof(STCHIP_Register_t);
+		ssize_t ret=0;
+		ssize_t ret1;
+		size_t x;
+		size_t len1;
 		char temp[sizeof(STCHIP_Register_t)];
+		if(offset < 0)
+			return -EINVAL;
+		x = offset % reg_size;
 		if(x >0) {
-			//partial read at start
-			ret1 = registers_read_(hChipHandle, temp, offset-x, sizeof(STCHIP_Register_t));
-			if(ret1 > len)
-				ret1 = len;
-			memcpy(buf, temp + x, ret1);
-			offset += ret1;
-			len -= ret1;
-			ret += ret1;
-			buf += ret1;
-			if(len ==0 || ret1 < len1 )
+			//partial read at start: the rest of the register at offset
+			len1 = min_t(size_t, reg_size - x, len);
+			ret1 = registers_read_(hChipHandle, temp, offset-x, reg_size);
+			if(ret1 < reg_size)
+				return 0;
+			memcpy(buf, temp + x, len1);
+			offset += len1;
+			len -= len1;
+			ret += len1;
+			buf += len1;
+			if(len ==0)
 				return ret;
 		}
-		x = len % sizeof(STCHIP_Register_t);
+		x = len % reg_size;
 		len1 = len  -x;
 		if (len1>0) {
 			ret1 = registers_read_(hChipHandle, buf, offset, len1);
 			offset += ret1;
-			len -= ret1;
 			ret += ret1;
 			buf += ret1;
-			if(len ==0 || ret1 < len1)
+			if(ret1 < len1)
 				return ret;
 		}
-		//partial read at end
-		ret1 = registers_read_(hChipHandle, temp, offset, sizeof(STCHIP_Register_t));
-		if (ret1 <  sizeof(STCHIP_Register_t))
+		if (x == 0)
+			return ret;
+		//partial read at end: the start of the register at offset
+		ret1 = registers_read_(hChipHandle, temp, offset, reg_size);
+		if (ret1 < reg_size)
 			return ret;
 		memcpy(buf, temp, x);
-		ret += ret1;
+		ret += x;
 		return ret;
 }
 
