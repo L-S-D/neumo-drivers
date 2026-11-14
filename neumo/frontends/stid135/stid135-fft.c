@@ -416,8 +416,8 @@ static fe_lla_error_t fe_stid135_term_fft(struct stv* state, s32 Reg[60])
 	error |= ChipSetField (pParams->handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_TNRCFG2_TUN_IQSWAP(path), Reg[i++]);
 
 	error |= ChipSetField (pParams->handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_AGC1ADJ_AGC1ADJ_MANUAL(path), Reg[i++]);
-	error |= ChipSetField (pParams->handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_AGC2ADJ_AGC2ADJ_MANUAL(path), Reg[i++]);
 	error |= ChipSetField (pParams->handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_AGC1ADJ_AGC1_ADJUSTED(path), Reg[i++]);
+	error |= ChipSetField (pParams->handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_AGC2ADJ_AGC2ADJ_MANUAL(path), Reg[i++]);
 
 #if 0
 	error |= ChipSetField(pParams->handle_demod,  FLD_FSTID135_AFE_AFE_AGC2_CTRL_AGC2_BB_CTRL+	DVBSX_DEMOD[path-1], Reg[i++]);
