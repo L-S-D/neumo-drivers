@@ -320,6 +320,23 @@ static int ts_release(struct inode *inode, struct file *file)
 }
 
 
+/*
+	The register access ioctls take any offset into the registers of the card
+	(and the card can be made to dma anywhere): only for an administrator, and
+	only for an aligned register within BAR 0
+ */
+static int check_reg_access(struct tbsecp3_ci *tbsci, const struct mcu24cxx_info *info)
+{
+	struct pci_dev *pdev = tbsci->adapter->dev->pci_dev;
+	u64 offset = (u64)info->bassaddr + info->reg;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+	if ((offset & 3) || offset + 4 > pci_resource_len(pdev, 0))
+		return -EINVAL;
+	return 0;
+}
+
 static void spi_read(struct tbsecp3_ci *tbsci, struct mcu24cxx_info *info)
 {
 	struct tbsecp3_adapter *adapter =tbsci->adapter;
@@ -407,12 +424,25 @@ static long tbsci_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		}
 		break;
 	case FE_ECP3FW_READ:
-		ret = copy_from_user(&wrinfo , (const char*)arg, sizeof(struct mcu24cxx_info ));
+		if (copy_from_user(&wrinfo , (const char*)arg, sizeof(struct mcu24cxx_info ))) {
+			ret = -EFAULT;
+			break;
+		}
+		ret = check_reg_access(chan, &wrinfo);
+		if (ret < 0)
+			break;
 		spi_read(chan, &wrinfo);
-		ret = copy_to_user((void *)arg, &wrinfo, sizeof(struct mcu24cxx_info ));
+		if (copy_to_user((void *)arg, &wrinfo, sizeof(struct mcu24cxx_info )))
+			ret = -EFAULT;
 		break;
 	case FE_ECP3FW_WRITE:
-		ret = copy_from_user(&wrinfo , (const char*)arg, sizeof(struct mcu24cxx_info ));
+		if (copy_from_user(&wrinfo , (const char*)arg, sizeof(struct mcu24cxx_info ))) {
+			ret = -EFAULT;
+			break;
+		}
+		ret = check_reg_access(chan, &wrinfo);
+		if (ret < 0)
+			break;
 		spi_write(chan, &wrinfo);
 		break;
 	default:
