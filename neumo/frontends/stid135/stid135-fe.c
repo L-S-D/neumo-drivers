@@ -2238,6 +2238,7 @@ static int stid135_set_tone(struct neumo_dvb_frontend* fe, enum fe_sec_tone_mode
 	state_chip_lock(state);
 	if(!rf_in->controlling_chip) {
 		state_dprintk("BUG: controlling_chip=NULL != chip=%p\n", state->chip);
+		state_chip_unlock(state);
 		return -1;
 	}
 	if(rf_in->controlling_chip != state->chip)
