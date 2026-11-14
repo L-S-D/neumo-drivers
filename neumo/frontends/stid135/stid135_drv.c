@@ -4419,6 +4419,10 @@ fe_lla_error_t FE_STiD135_Algo(struct stv* state, BOOL satellite_scan, enum fe_s
 				if (symbol_rate > 0 && symbol_rate < 5000000)
 					limit = min_t(u32, 3000, (220U * 5000000U) / symbol_rate);
 				while ((fld_value != TRUE) && (pdel_status_timeout < limit)) {
+					if (kthread_should_stop() || neumo_dvb_frontend_task_should_stop(&state->fe)) {
+						state_dprintk("exiting on should stop\n");
+						break;
+					}
 					state_chip_sleep(state, 5);
 					pdel_status_timeout += 5;
 					//stv09x1 checks bit 1 (PKTDELIN_LOCK)  whereas this code checks bit 0 ( FIRST_LOCK)
