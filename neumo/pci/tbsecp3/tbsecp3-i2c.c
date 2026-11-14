@@ -24,12 +24,13 @@ static int i2c_speed = 0;  /* 0 = use card default, otherwise override for all c
 module_param(i2c_speed, int, 0644);
 MODULE_PARM_DESC(i2c_speed, "I2C speed for all cards (0=use defaults, 3=1302kHz, 4=977kHz, 9=434kHz, 39=100kHz)");
 
-/* Per-board-type I2C speed overrides (indexed by board_id) */
-#define MAX_BOARD_TYPES 64  /* must be larger than highest TBSECP3_BOARD_* define */
-static int i2c_speed_board[MAX_BOARD_TYPES];
+/* Per-board-type I2C speed overrides (format: "board_id:speed,board_id:speed,...") */
+#define MAX_BOARD_OVERRIDES 16
+static char *i2c_speed_board[MAX_BOARD_OVERRIDES];
 static int i2c_speed_board_count = 0;
-module_param_array(i2c_speed_board, int, &i2c_speed_board_count, 0644);
-MODULE_PARM_DESC(i2c_speed_board, "Per-board-type I2C speed (indexed by board_id)");
+module_param_array(i2c_speed_board, charp, &i2c_speed_board_count, 0644);
+MODULE_PARM_DESC(i2c_speed_board, "Per-board-type I2C speed (format: \"board_id:speed\", e.g. \"22:4\" "
+								 "for the TBS 6909X; the board id is logged when a card is probed)");
 
 /* Per-card MAC address overrides (format: "mac_addr:speed,mac_addr:speed,...") */
 #define MAX_MAC_OVERRIDES 16
@@ -45,6 +46,50 @@ struct mac_speed_override {
 
 static struct mac_speed_override mac_overrides[MAX_MAC_OVERRIDES];
 static int mac_override_count = 0;
+
+struct board_speed_override {
+	unsigned int board_id;
+	int speed;
+};
+
+static struct board_speed_override board_overrides[MAX_BOARD_OVERRIDES];
+static int board_override_count = 0;
+
+/* Parse board overrides from module parameter strings */
+static void parse_board_overrides(void)
+{
+	int i;
+
+	board_override_count = 0;
+
+	for (i = 0; i < i2c_speed_board_count && i < MAX_BOARD_OVERRIDES; i++) {
+		char buf[16];
+		char *colon = NULL;
+		unsigned int board_id;
+		int speed;
+
+		if (!i2c_speed_board[i])
+			continue;
+
+		/* Parse "22:9" format */
+		if (strscpy(buf, i2c_speed_board[i], sizeof(buf)) > 0)
+			colon = strchr(buf, ':');
+		if (colon)
+			*colon = 0;
+		if (!colon || kstrtouint(buf, 10, &board_id) ||
+				kstrtoint(colon + 1, 10, &speed) || speed <= 0) {
+			pr_err("tbsecp3: Invalid board override: %s (expected 'board_id:speed')\n",
+			       i2c_speed_board[i]);
+			continue;
+		}
+
+		board_overrides[board_override_count].board_id = board_id;
+		board_overrides[board_override_count].speed = speed;
+		pr_info("tbsecp3: board override[%d]: board %u -> speed=%d\n",
+		        board_override_count, board_id, speed);
+		board_override_count++;
+	}
+}
 
 /* Parse MAC address overrides from module parameter strings */
 static void parse_mac_overrides(void)
@@ -106,10 +151,11 @@ static u32 get_i2c_speed_for_card(struct tbsecp3_dev *dev, const char** source)
 	}
 
 	/* Priority 2: Check per-board-type override */
-	if (board_id < MAX_BOARD_TYPES && board_id < i2c_speed_board_count &&
-			i2c_speed_board[board_id] > 0) {
-		*source = "board override";
-		return i2c_speed_board[board_id];
+	for (i = 0; i < board_override_count; i++) {
+		if (board_overrides[i].board_id == board_id) {
+			*source = "board override";
+			return board_overrides[i].speed;
+		}
 	}
 
 	/* Priority 3: Check global override */
@@ -269,17 +315,18 @@ void tbsecp3_i2c_reg_init(struct tbsecp3_dev *dev)
 	const char* source;
 	u32 baud;
 
-	/* Parse MAC overrides once on first call */
+	/* Parse MAC and board overrides once on first call */
 	static bool mac_parsed = false;
 	if (!mac_parsed) {
 		parse_mac_overrides();
+		parse_board_overrides();
 		mac_parsed = true;
 	}
 
 	baud = get_i2c_speed_for_card(dev, &source);
 	dev->i2c_baud = baud;
-	dev_info(&dev->pci_dev->dev, "%s (MAC 0x%012llx) i2c_speed=%u (~%u kHz, %s)\n",
-					 dev->info->short_name, dev->card_mac_address, baud,
+	dev_info(&dev->pci_dev->dev, "%s (board %u, MAC 0x%012llx) i2c_speed=%u (~%u kHz, %s)\n",
+					 dev->info->short_name, dev->info->board_id, dev->card_mac_address, baud,
 					 125000 / 4 / baud / 2 / 4, source);
 
 	for (i = 0; i < 4; i++) {
