@@ -238,9 +238,6 @@ static int tbsecp3_i2c_register(struct tbsecp3_i2c *bus)
 	struct tbsecp3_dev *dev = bus->dev;
 	struct i2c_adapter *adap;
 
-	init_waitqueue_head(&bus->wq);
-	mutex_init(&bus->lock);
-
 	adap = &bus->i2c_adap;
 	strcpy(adap->name, "tbsecp3");
 	adap->algo = &tbsecp3_i2c_algo_template;
@@ -282,10 +279,13 @@ void tbsecp3_i2c_reg_init(struct tbsecp3_dev *dev)
 					 dev->info->short_name, dev->card_mac_address, baud,
 					 125000 / 4 / baud / 2 / 4, source);
 
-	for (i = 0; i < 4; i++) {
+	for (i = 0; i < dev->i2c_buses; i++) {
 		tbs_write(dev->i2c_bus[i].base, TBSECP3_I2C_BAUD, baud);
 		tbs_read(dev->i2c_bus[i].base, TBSECP3_I2C_STAT);
-		tbs_write(TBSECP3_INT_BASE, TBSECP3_I2C_IE(i), 1);
+		if (i < 4)
+			tbs_write(TBSECP3_INT_BASE, TBSECP3_I2C_IE(i), 1);
+		else
+			tbs_write(TBSECP3_INT_BASE, TBSECP3_I2C_IE1(i), 1);
 	}
 }
 
@@ -305,7 +305,7 @@ void tbsecp3_i2c_update_speed(struct tbsecp3_dev *dev)
 	dev_info(&dev->pci_dev->dev, "%s (MAC 0x%012llx) changing i2c_speed %u -> %u (~%u kHz, %s)\n",
 					 dev->info->short_name, dev->card_mac_address, dev->i2c_baud, baud,
 					 125000 / 4 / baud / 2 / 4, source);
-	for (i = 0; i < 4; i++) {
+	for (i = 0; i < dev->i2c_buses; i++) {
 		mutex_lock(&dev->i2c_bus[i].lock);
 		tbs_write(dev->i2c_bus[i].base, TBSECP3_I2C_BAUD, baud);
 		mutex_unlock(&dev->i2c_bus[i].lock);
@@ -313,14 +313,38 @@ void tbsecp3_i2c_update_speed(struct tbsecp3_dev *dev)
 	dev->i2c_baud = baud;
 }
 
+/*
+	Number of i2c buses a card needs: the buses of its adapters and of its eeprom,
+	and at least the four buses that are registered for every card.
+ */
+static int tbsecp3_i2c_bus_count(struct tbsecp3_dev *dev)
+{
+	int i, n = 4;
+
+	for (i = 0; i < dev->info->adapters; i++)
+		n = max_t(int, n, dev->info->adap_config[i].i2c_bus_nr + 1);
+	n = max_t(int, n, dev->info->eeprom_i2c + 1);
+	return min_t(int, n, TBSECP3_MAX_I2C_BUS);
+}
+
 int tbsecp3_i2c_init(struct tbsecp3_dev *dev)
 {
 	int i, ret = 0;
 
-	/* I2C Defaults / setup */
-	for (i = 0; i < 4; i++) {
-		dev->i2c_bus[i].base = TBSECP3_I2C_BASE(i);
+	/*
+	 * The interrupt handler wakes the waiters of all eight buses, so set
+	 * up the wait queues and locks of the buses that are not registered too.
+	 */
+	for (i = 0; i < TBSECP3_MAX_I2C_BUS; i++) {
 		dev->i2c_bus[i].dev = dev;
+		init_waitqueue_head(&dev->i2c_bus[i].wq);
+		mutex_init(&dev->i2c_bus[i].lock);
+	}
+	dev->i2c_buses = tbsecp3_i2c_bus_count(dev);
+
+	/* I2C Defaults / setup */
+	for (i = 0; i < dev->i2c_buses; i++) {
+		dev->i2c_bus[i].base = TBSECP3_I2C_BASE(i);
 		ret = tbsecp3_i2c_register(&dev->i2c_bus[i]);
 		if (ret)
 			break;
@@ -338,7 +362,7 @@ int tbsecp3_i2c_init(struct tbsecp3_dev *dev)
 void tbsecp3_i2c_exit(struct tbsecp3_dev *dev)
 {
 	int i;
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < dev->i2c_buses; i++)
 		tbsecp3_i2c_unregister(&dev->i2c_bus[i]);
 }
 
