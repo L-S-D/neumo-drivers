@@ -554,14 +554,17 @@ static ssize_t stv_demod_show(struct kobject *kobj, struct kobj_attribute *attr,
 								 info->has_sync, info->has_timedout, info->has_timing_lock);
 	ret += sprintf(buf+ret,"freq=%d sym_rate=%d modcode=%d\n",
 								 info->frequency, info->symbol_rate, info->modcode);
-	int tot = state->signal_info.modcod_list.totcount;
+	/* The frontend thread updates the counts without a lock that could be taken
+		 here, and each tune clears them: read each value once, and never divide by
+		 a total of 0 */
+	int tot = READ_ONCE(state->signal_info.modcod_list.totcount);
 	bool is_start = true;
 	const int num_modcods = sizeof(state->signal_info.modcod_list.count)/sizeof(state->signal_info.modcod_list.count[0]);
 	if(num_modcods >0) {
 		ret += sprintf(buf+ret,"modcods:");
 		for(int i=0 ; i < num_modcods; ++i) {
-			int count =  state->signal_info.modcod_list.count[i];
-			if(count >0) {
+			int count =  READ_ONCE(state->signal_info.modcod_list.count[i]);
+			if(count >0 && tot > 0) {
 				int frac = (count * 1000 + 499) / tot;
 				if(frac >=1) {
 					if(is_start)
