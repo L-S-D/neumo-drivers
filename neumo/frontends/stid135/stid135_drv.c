@@ -6513,6 +6513,9 @@ fe_lla_error_t fe_stid135_diseqc_send(struct stv* state,
 			i=0;
 			error |= ChipGetField(handle_demod, FLD_FC8CODEW_DVBSX_DISEQC_DISTXSTATUS_TX_IDLE(tuner_nb), &fld_value);
 			//vprintk("[%d] lfd[%d]=%x",  tuner_nb, i, fld_value);
+			/* the chip mutex is released while sleeping: tell the other demods on
+			 * this rf_in not to reset the transmitter before the message is out */
+			state->active_tuner->active_rf_in->diseqc_tx_busy = true;
 			while((fld_value != 1) && (i < 10) && !handle_demod->Error) {
 				/*wait until the end of diseqc send operation */
 				state_chip_sleep(state, 10);
@@ -6520,6 +6523,7 @@ fe_lla_error_t fe_stid135_diseqc_send(struct stv* state,
 				error |= ChipGetField(handle_demod, FLD_FC8CODEW_DVBSX_DISEQC_DISTXSTATUS_TX_IDLE(tuner_nb), &fld_value);
 				//vprintk("[%d] lfd[%d]=%x",  tuner_nb, i, fld_value);
 			}
+			state->active_tuner->active_rf_in->diseqc_tx_busy = false;
 
 			if(tuner_nb == AFE_TUNER1) {
 				error |= ChipSetField(handle_demod, FLD_FC8CODEW_DVBSX_DISEQC_DISRXCFG_DISRX_ON(AFE_TUNER1), 1);

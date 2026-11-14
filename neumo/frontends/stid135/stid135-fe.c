@@ -2312,6 +2312,11 @@ static int stid135_send_long_master_cmd_(struct stv *state, struct dvb_diseqc_lo
 									tuner->tuner_no,
 									tuner->reservation.use_count, rf_in->rf_in_no, rf_in->reservation.use_count, state->legacy_rf_in);
 	} else {
+		int wait;
+		/* another demod on this rf_in (a unicable slave) may still be sending:
+		 * fe_stid135_diseqc_init() resets the transmitter and would cut its message */
+		for (wait = 0; rf_in->diseqc_tx_busy && wait < 20; wait++)
+			state_chip_sleep(state, 10);
 		err |= fe_stid135_diseqc_init(&rf_in->controlling_chip->ip, rf_in->rf_in_no + 1, FE_SAT_DISEQC_2_3_PWM);
 		err |= fe_stid135_diseqc_send(state, rf_in->rf_in_no + 1, cmd->msg, cmd->msg_len);
 		char msg[64];
