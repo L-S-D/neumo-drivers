@@ -6484,11 +6484,24 @@ fe_lla_error_t fe_stid135_diseqc_send(struct stv* state,
 
 			error |= ChipSetField(handle_demod, FLD_FC8CODEW_DVBSX_DISEQC_DISTXCFG_DIS_PRECHARGE(tuner_nb), 1);
 			while(i < nbdata) {
+				int timeout = 0;
 				error |= ChipGetField(handle_demod, FLD_FC8CODEW_DVBSX_DISEQC_DISTXSTATUS_TX_FIFO_FULL(tuner_nb), &fld_value);
 				//vprintk("[%d] fld[%d]=%x",  tuner_nb, i, fld_value);
-				while(fld_value) {
+				/* A byte takes 13.5 ms to send. Once the chip is in error,
+				 * ChipGetField() returns 0xFF without reading: do not wait
+				 * for ever then. The chip mutex stays held, so that no other
+				 * demod gets to this transmitter in the middle of a message. */
+				while(fld_value && !handle_demod->Error && timeout < 100) {
+					usleep_range(1000, 2000);
+					timeout++;
 					error |= ChipGetField(handle_demod, FLD_FC8CODEW_DVBSX_DISEQC_DISTXSTATUS_TX_FIFO_FULL(tuner_nb), &fld_value);
 					//vprintk("[%d] fld[%d]=%x",  tuner_nb, i, fld_value);
+				}
+				if(fld_value || handle_demod->Error) {
+					state_dprintk("DiSEqC TX FIFO of tuner %d still full at byte %d/%d: chip error=%d\n",
+												tuner_nb, i, nbdata, handle_demod->Error);
+					error |= FE_LLA_I2C_ERROR;
+					break;
 				}
 				WARN_ON(i<0 || i>=nbdata);
 				//vprintk("[%d] data[%d]=%x",  tuner_nb, i, data[i]);
@@ -6500,7 +6513,7 @@ fe_lla_error_t fe_stid135_diseqc_send(struct stv* state,
 			i=0;
 			error |= ChipGetField(handle_demod, FLD_FC8CODEW_DVBSX_DISEQC_DISTXSTATUS_TX_IDLE(tuner_nb), &fld_value);
 			//vprintk("[%d] lfd[%d]=%x",  tuner_nb, i, fld_value);
-			while((fld_value != 1) && (i < 10)) {
+			while((fld_value != 1) && (i < 10) && !handle_demod->Error) {
 				/*wait until the end of diseqc send operation */
 				state_chip_sleep(state, 10);
 				i++;
