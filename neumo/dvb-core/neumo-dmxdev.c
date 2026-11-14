@@ -1512,9 +1512,12 @@ static __poll_t neumo_dvb_demux_poll(struct file *file, poll_table *wait)
 	struct neumo_dmxdev_filter *dmxdevfilter = file->private_data;
 	__poll_t mask = 0;
 
+	if (!dmxdevfilter)
+		return EPOLLERR;
+
 	poll_wait(file, &dmxdevfilter->buffer.queue, wait);
 
-	if ((!dmxdevfilter) || dmxdevfilter->dev->exit)
+	if (dmxdevfilter->dev->exit)
 		return EPOLLERR;
 	if (dvb_vb2_is_streaming(&dmxdevfilter->vb2_ctx))
 		return dvb_vb2_poll(&dmxdevfilter->vb2_ctx, file, wait);
