@@ -63,6 +63,13 @@ static irqreturn_t tbsecp3_irq_handler(int irq, void *dev_id)
 	int nr = dev->info->adapters;
 
 	u32 stat = tbs_read(TBSECP3_INT_BASE, TBSECP3_INT_STAT);
+
+	/*
+	 * All ones: the card does not answer (e.g. after a pcie error), so the
+	 * bits mean nothing. Zero on a shared line: another device interrupted.
+	 */
+	if (stat == 0xffffffff || (!stat && !dev->msi))
+		return IRQ_NONE;
 	tbs_write(TBSECP3_INT_BASE, TBSECP3_INT_STAT, stat);
 
 	if (stat & 0x00000ff0) {
