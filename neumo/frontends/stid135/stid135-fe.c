@@ -2469,7 +2469,30 @@ static int stid135_send_burst(struct neumo_dvb_frontend* fe, enum fe_sec_mini_cm
 		return 0;
 	}
 
-	dprintk("err=%d\n",err);
+	if(!rf_in->controlling_chip) {
+		state_dprintk("BUG: rf_in[%d]->controlling_chip=NULL\n", rf_in->rf_in_no);
+		return -1;
+	}
+
+	/*
+		Tone burst A is 12.5 ms of unmodulated 22 kHz, burst B nine DiSEqC "1" bits.
+		As stv090x does with the same DiSEqC block: send one byte, 0x00 in 3/3 PWM
+		mode for A, 0xff in the normal 2/3 PWM mode for B.
+	 */
+	{
+		u8 data = (burst == SEC_MINI_A) ? 0x00 : 0xff;
+		int wait;
+		state_chip_lock(state);
+		for (wait = 0; rf_in->diseqc_tx_busy && wait < 20; wait++)
+			state_chip_sleep(state, 10);
+		err |= fe_stid135_diseqc_init(&rf_in->controlling_chip->ip, rf_in->rf_in_no + 1,
+																	burst == SEC_MINI_A ? FE_SAT_DISEQC_3_3_PWM : FE_SAT_DISEQC_2_3_PWM);
+		err |= fe_stid135_diseqc_send(state, rf_in->rf_in_no + 1, &data, 1);
+		if(burst == SEC_MINI_A) //back to 2/3 PWM, the mode used for diseqc with the tone off
+			err |= fe_stid135_set_22khz_cont(&rf_in->controlling_chip->ip, rf_in->rf_in_no + 1, false);
+		state_chip_unlock(state);
+	}
+	state_dprintk("burst %s sent: rf_in=%d err=%d\n", burst == SEC_MINI_A ? "A" : "B", rf_in->rf_in_no, err);
 	return err != 0 ? -1 : 0;
 }
 
