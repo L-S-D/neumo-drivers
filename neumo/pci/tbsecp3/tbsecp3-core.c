@@ -164,10 +164,15 @@ static int tbsecp3_adapters_attach(struct tbsecp3_dev *dev)
 	return 0;
 }
 
+static void tbsecp3_ci_detach(struct tbsecp3_dev *dev);
+
 static void tbsecp3_adapters_detach(struct tbsecp3_dev *dev)
 {
 	struct tbsecp3_adapter *adapter;
 	int i;
+	/* the CI adapters of the TBS 6910X, which were attached last */
+	if ((cimode == 0) && (dev->info->sec != 0))
+		tbsecp3_ci_detach(dev);
 	dprintk("detaching %d adapters", dev->info->adapters);
 	for (i = 0; i < dev->info->adapters; i++) {
 		adapter = &dev->adapter[i];
@@ -378,9 +383,6 @@ static int tbsecp3_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 err5:
 	tbsecp3_adapters_detach(dev);
-
-   	if((cimode==0 )&(dev->info->sec!=0))
-	   tbsecp3_ci_detach(dev);
 
 	tbs_write(TBSECP3_INT_BASE, TBSECP3_INT_EN, 0);
 	free_irq(dev->pci_dev->irq, dev);

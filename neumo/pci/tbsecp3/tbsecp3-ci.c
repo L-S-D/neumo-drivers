@@ -58,7 +58,6 @@ static void start_indma_transfer(struct tbsecp3_ci *pchannel)
 	tbs_write(TBS_WRDMA_BASE(pchannel->nr), TBSECP3_DMA_EN, (1));
 }
 
-#ifdef UNUSED
 static void stop_indma_transfer(struct tbsecp3_ci *pchannel)
 {
 	struct tbsecp3_adapter *adapter = pchannel->adapter;
@@ -68,7 +67,6 @@ static void stop_indma_transfer(struct tbsecp3_ci *pchannel)
 	tbs_write(TBSECP3_INT_BASE, TBS_WRDMA_IE(pchannel->nr), (0));
 	tbs_write(TBS_WRDMA_BASE(pchannel->nr), TBSECP3_DMA_EN, (0));
 }
-#endif
 
 static void write_dma_work(struct work_struct *p_work)
 {
@@ -530,7 +528,13 @@ static int my_dvb_dmxdev_ts_card_init(struct neumo_dmxdev *dmxdev,
 	dvbdemux->dmx.add_frontend(&dvbdemux->dmx, hw_frontend);
 	mem_frontend->source = DMX_MEMORY_FE;
 	dvbdemux->dmx.add_frontend(&dvbdemux->dmx, mem_frontend);
-	return dvbdemux->dmx.connect_frontend(&dvbdemux->dmx, hw_frontend);
+	ret = dvbdemux->dmx.connect_frontend(&dvbdemux->dmx, hw_frontend);
+	if (ret < 0) {
+		dvbdemux->dmx.remove_frontend(&dvbdemux->dmx, mem_frontend);
+		dvbdemux->dmx.remove_frontend(&dvbdemux->dmx, hw_frontend);
+		neumo_dvb_dmxdev_release(dmxdev);
+	}
+	return ret;
 }
 
 static void tbsecp3_dma_register_init(struct tbsecp3_adapter *adap)
@@ -593,24 +597,47 @@ static int tbs_frontend_attach(struct tbsecp3_adapter *adapter)
 	return 0;
 }
 
-void tbsecp3_ci_remove(struct tbsecp3_adapter *adap)
+/* the buffers of a CI, as far as they have been allocated */
+static void tbsecp3_ci_free(struct tbsecp3_adapter *adap, struct tbsecp3_ci *tbsci)
 {
-	struct tbsecp3_ci *tbsci = adap->tbsci;
-	struct neumo_dvb_demux *dvbdemux;
-
 	kfifo_free(&tbsci->w_fifo);
 	kfifo_free(&tbsci->r_fifo);
 
-	if (!tbsci->w_dmavirt){
+	if (tbsci->w_dmavirt){
 		dma_free_coherent(&adap->dev->pci_dev->dev, DMASIZE, tbsci->w_dmavirt, tbsci->w_dmaphy);
 		tbsci->w_dmavirt = NULL;
 	}
-	if (!tbsci->r_dmavirt){
+	if (tbsci->r_dmavirt){
 		dma_free_coherent(&adap->dev->pci_dev->dev, DMASIZE, tbsci->r_dmavirt, tbsci->r_dmaphy);
 		tbsci->r_dmavirt = NULL;
 	}
+	kfree(tbsci);
+}
 
-	dvbdemux = &adap->demux;
+/*
+	Hide the CI from the interrupt handler, which queues its work, and wait until
+	no work of it is queued or running any more
+ */
+static void tbsecp3_ci_unpublish(struct tbsecp3_adapter *adap, struct tbsecp3_ci *tbsci)
+{
+	WRITE_ONCE(adap->tbsci, NULL);
+	synchronize_irq(adap->dev->pci_dev->irq);
+	cancel_work_sync(&tbsci->read_work);
+	cancel_work_sync(&tbsci->write_work);
+}
+
+void tbsecp3_ci_remove(struct tbsecp3_adapter *adap)
+{
+	struct tbsecp3_ci *tbsci = adap->tbsci;
+	struct neumo_dvb_demux *dvbdemux = &adap->demux;
+
+	if (!tbsci)
+		return;
+	/* stop both dma channels before the CI is hidden from the interrupt handler */
+	stop_indma_transfer(tbsci);
+	stop_outdma_transfer(tbsci);
+	tbsecp3_ci_unpublish(adap, tbsci);
+
 	dvb_net_release(&adap->dvbnet);
 	dvbdemux->dmx.close(&dvbdemux->dmx);
 	dvbdemux->dmx.remove_frontend(&dvbdemux->dmx, &adap->fe_mem);
@@ -618,8 +645,12 @@ void tbsecp3_ci_remove(struct tbsecp3_adapter *adap)
 	neumo_dvb_dmxdev_release(&adap->dmxdev);
 	neumo_dvb_dmx_release(&adap->demux);
 	neumo_dvb_unregister_frontend(adap->fe);
+	neumo_dvb_frontend_detach(adap->fe);
+	adap->fe = NULL;
 	dvb_unregister_device(tbsci->ci_dev);
-
+	tbsecp3_ca_release(adap);
+	dvb_unregister_adapter(&adap->dvb_adapter);
+	tbsecp3_ci_free(adap, tbsci);
 }
 
 int tbsecp3_ci_init(struct tbsecp3_adapter *adap,int nr,int cimode)
@@ -633,18 +664,20 @@ int tbsecp3_ci_init(struct tbsecp3_adapter *adap,int nr,int cimode)
 	if(tbsci==NULL)
 		return -ENOMEM;
 
-	adap->tbsci = tbsci;
+	tbsci->adapter= adap;
 	tbsci->w_dmavirt = dma_alloc_coherent(&dev->pci_dev->dev, DMASIZE, &tbsci->w_dmaphy, GFP_KERNEL);
 	if (!tbsci->w_dmavirt)
 	{
 		printk(" allocate write memory failed\n");
-		goto fail;
+		ret = -ENOMEM;
+		goto fail_free;
 	}
 	tbsci->r_dmavirt = dma_alloc_coherent(&dev->pci_dev->dev, DMASIZE, &tbsci->r_dmaphy, GFP_KERNEL);
 	if (!tbsci->r_dmavirt)
 	{
 		printk(" allocate read memory failed\n");
-		goto fail;
+		ret = -ENOMEM;
+		goto fail_free;
 	}
 
 
@@ -657,10 +690,10 @@ int tbsecp3_ci_init(struct tbsecp3_adapter *adap,int nr,int cimode)
 
 	ret = kfifo_alloc(&tbsci->w_fifo, FIFOSIZE, GFP_KERNEL);
 	if (ret != 0)
-		goto fail;
+		goto fail_free;
 	ret = kfifo_alloc(&tbsci->r_fifo, FIFOSIZE, GFP_KERNEL);
 	if (ret != 0)
-		goto fail;
+		goto fail_free;
 
 	INIT_WORK(&tbsci->read_work,read_dma_work);
 	INIT_WORK(&tbsci->write_work,write_dma_work);
@@ -669,28 +702,43 @@ int tbsecp3_ci_init(struct tbsecp3_adapter *adap,int nr,int cimode)
 	spin_lock_init(&tbsci->readlock);
 	spin_lock_init(&tbsci->writelock);
 
-	tbsci->adapter= adap;
+	/* from here on the interrupt handler may queue the work of the CI */
+	WRITE_ONCE(adap->tbsci, tbsci);
 	tbsecp3_dma_register_init(adap);
 
 	ret = dvb_register_adapter(&adap->dvb_adapter, "tbsci",THIS_MODULE,&adap->dev->pci_dev->dev,sec_nr);
+	if (ret < 0) {
+		printk("%s ERROR: dvb_register_adapter\n", __func__);
+		goto fail_unpublish;
+	}
 
-	ret = tbsecp3_ca_init(adap, nr);
+	/* as before, the CI device is set up without the CA if that fails */
+	if (tbsecp3_ca_init(adap, nr))
+		adap->tbsca = NULL;
 
 	ret = dvb_register_device(&adap->dvb_adapter, &tbsci->ci_dev,&tbs_ci, (void *) tbsci,DVB_DEVICE_SEC,0);
 	if (ret < 0) {
 		printk("%s ERROR: dvb_register_device\n", __func__);;
-		goto fail;
+		goto fail_adapter;
 	}
 
-	tbs_frontend_attach(adap);
+	ret = tbs_frontend_attach(adap);
+	if (ret < 0) {
+		printk("%s ERROR: tbs_frontend_attach\n", __func__);
+		goto fail_device;
+	}
 
 	ret = neumo_dvb_register_frontend(&adap->dvb_adapter, adap->fe) ;
+	if (ret < 0) {
+		printk("%s ERROR: neumo_dvb_register_frontend\n", __func__);
+		goto fail_detach;
+	}
 	ret = my_dvb_dmx_ts_card_init(&adap->demux, "SW demux",
 					  start_feed,
 					  stop_feed, adap->tbsci);
 	if (ret < 0) {
 		printk("%s ERROR: my_dvb_dmx_ts_card_init\n", __func__);;
-		goto fail;
+		goto fail_frontend;
 	}
 
 	ret = my_dvb_dmxdev_ts_card_init(&adap->dmxdev, &adap->demux,
@@ -698,18 +746,38 @@ int tbsecp3_ci_init(struct tbsecp3_adapter *adap,int nr,int cimode)
 					 &adap->fe_mem, &adap->dvb_adapter);
 	if (ret < 0) {
 		printk("%s ERROR: my_dvb_dmxdev_ts_card_init\n", __func__);;
-		goto fail;
+		goto fail_dmx;
 	}
 	ret = dvb_net_init(&adap->dvb_adapter, &adap->dvbnet,&adap->demux.dmx);
 	if (ret < 0) {
 		printk("%s ERROR: dvb_net_init\n", __func__);;
-		goto fail;
+		goto fail_dmxdev;
 	}
 
 
 	return 0;
 
-fail :
-	tbsecp3_ci_remove(adap);
+fail_dmxdev:
+	adap->demux.dmx.close(&adap->demux.dmx);
+	adap->demux.dmx.remove_frontend(&adap->demux.dmx, &adap->fe_mem);
+	adap->demux.dmx.remove_frontend(&adap->demux.dmx, &adap->fe_hw);
+	neumo_dvb_dmxdev_release(&adap->dmxdev);
+fail_dmx:
+	neumo_dvb_dmx_release(&adap->demux);
+fail_frontend:
+	neumo_dvb_unregister_frontend(adap->fe);
+fail_detach:
+	neumo_dvb_frontend_detach(adap->fe);
+	adap->fe = NULL;
+fail_device:
+	dvb_unregister_device(tbsci->ci_dev);
+fail_adapter:
+	tbsecp3_ca_release(adap);
+	dvb_unregister_adapter(&adap->dvb_adapter);
+fail_unpublish:
+	tbsecp3_ci_unpublish(adap, tbsci);
+fail_free:
+	tbsecp3_ci_free(adap, tbsci);
 	return ret;
 }
+
