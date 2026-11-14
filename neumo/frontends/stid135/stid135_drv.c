@@ -4429,7 +4429,13 @@ fe_lla_error_t FE_STiD135_Algo(struct stv* state, BOOL satellite_scan, enum fe_s
 					error |= (error1=ChipGetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_PDELSTATUS1_FIRST_LOCK(Demod), &fld_value));
 					if(error1)
 						dprintk("demod=%d: ERROR=%d\n", state->nr, error1);
+					if (error1 || state->chip->ip.handle_demod->Error)
+						break;
 				}
+				/* A failed read returns all bits set, and ChipGetField() skips
+				 * the read and returns 0xFF while the chip is in error: no lock */
+				if (error1 || state->chip->ip.handle_demod->Error)
+					fld_value = FALSE;
 				if(fld_value != 0 && fld_value != 1)
 					state_dprintk("FLD=0x%x\n", fld_value);
 				state->signal_info.has_viterbi = (fld_value &0x1);
