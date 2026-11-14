@@ -3139,17 +3139,24 @@ static int dtv_set_pls_search_list(struct neumo_dvb_frontend* fe, struct dtv_pls
 {
 	int i;
 	struct neumo_dtv_frontend_properties *c = &fe->dtv_property_cache;
-	c->pls_search_codes_len = sizeof(c->pls_search_codes)/sizeof(c->pls_search_codes[0]);
-	if(user->num_codes < c->pls_search_codes_len)
-		c->pls_search_codes_len = user->num_codes;
-	if(c->pls_search_codes_len==0 || user->codes == NULL) {
-		fe_dprintk(fe, "ERROR: len=%d/%d codes=%p", c->pls_search_codes_len, user->num_codes, user->codes);
+	/*
+	 * num_codes comes from user space and is signed: clamp it as an int
+	 * before it goes into the u8 pls_search_codes_len, and set the length
+	 * only after the codes have been copied
+	 */
+	int len = ARRAY_SIZE(c->pls_search_codes);
+	if(user->num_codes < len)
+		len = user->num_codes;
+	c->pls_search_codes_len = 0;
+	if(len <= 0 || user->codes == NULL) {
+		fe_dprintk(fe, "ERROR: len=%d/%d codes=%p", len, user->num_codes, user->codes);
 		return -EFAULT;
 	}
-	if (copy_from_user(&c->pls_search_codes, user->codes, c->pls_search_codes_len*sizeof(user->codes[0]))) {
-		fe_dprintk(fe, "ERROR: len=%d/%d codes=%p", c->pls_search_codes_len, user->num_codes, user->codes);
+	if (copy_from_user(&c->pls_search_codes, user->codes, len*sizeof(user->codes[0]))) {
+		fe_dprintk(fe, "ERROR: len=%d/%d codes=%p", len, user->num_codes, user->codes);
 		return -EFAULT;
 	}
+	c->pls_search_codes_len = len;
 	fe_dprintk(fe, "PLS: %d codes:\n", c->pls_search_codes_len);
 	for(i=0;i< c->pls_search_codes_len;++i)
 		fe_dprintk(fe, "code=0x%x\n", c->pls_search_codes[i]);
