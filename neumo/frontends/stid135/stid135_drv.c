@@ -4411,10 +4411,13 @@ fe_lla_error_t FE_STiD135_Algo(struct stv* state, BOOL satellite_scan, enum fe_s
 				 * longer on a narrow carrier: 220 ms were often too short there
 				 * (999 kBd QPSK 5/6), the search failed and left the demod locked
 				 * without data. Wait as many symbols as 220 ms are at 5 MBd, at
-				 * most 3 s. */
+				 * most 3 s. Use the symbol rate the demod has measured: the
+				 * requested one is only a hint for blind tunes (22 MBd by
+				 * default). */
 				u32 limit = 220;
-				if (state->demod_symbol_rate > 0 && state->demod_symbol_rate < 5000000)
-					limit = min_t(u32, 3000, (220U * 5000000U) / state->demod_symbol_rate);
+				u32 symbol_rate = state->signal_info.symbol_rate ?: state->demod_symbol_rate;
+				if (symbol_rate > 0 && symbol_rate < 5000000)
+					limit = min_t(u32, 3000, (220U * 5000000U) / symbol_rate);
 				while ((fld_value != TRUE) && (pdel_status_timeout < limit)) {
 					state_chip_sleep(state, 5);
 					pdel_status_timeout += 5;
