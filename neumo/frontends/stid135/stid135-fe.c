@@ -2366,11 +2366,14 @@ static int stid135_recv_slave_reply(struct neumo_dvb_frontend* fe,
 	if (state->chip->multiswitch_mode == 0)
 		return 0;
 #endif
-	if ((!tuner || ! rf_in)) {//@todo: locking maybe not needed
+	if ((!tuner || ! rf_in)) {
 		//for older applications, which do not call FE_SET_RF_INPUT
-		card_lock(state); //DeepThought: maybe not needed (as it does not use stid135 chips)
+		//selecting the rf_in enables the tuner and sets up diseqc: chip registers
+		state_chip_lock(state);
+		card_lock(state);
 		err |= stid135_select_rf_in_legacy_(state);
 		card_unlock(state);
+		state_chip_unlock(state);
 		rf_in = active_rf_in(state);
 		tuner = state->active_tuner;
 	}
