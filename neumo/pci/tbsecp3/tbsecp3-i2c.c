@@ -16,6 +16,7 @@
 */
 
 #include "tbsecp3.h"
+#include <linux/etherdevice.h>
 #define dprintk(fmt, arg...)																					\
 	printk(KERN_DEBUG pr_fmt("%s:%d " fmt), __func__, __LINE__, ##arg)
 
@@ -32,12 +33,18 @@ module_param_array(i2c_speed_board, charp, &i2c_speed_board_count, 0644);
 MODULE_PARM_DESC(i2c_speed_board, "Per-board-type I2C speed (format: \"board_id:speed\", e.g. \"22:4\" "
 								 "for the TBS 6909X; the board id is logged when a card is probed)");
 
-/* Per-card MAC address overrides (format: "mac_addr:speed,mac_addr:speed,...") */
+/*
+	Per-card MAC address overrides (format: "mac_addr:speed,mac_addr:speed,...").
+	The MAC is the card MAC as it is logged after the frontends have been attached,
+	either as "00:22:ab:12:34:56" or as the number 0x0022ab123456.
+ */
 #define MAX_MAC_OVERRIDES 16
 static char *i2c_speed_mac[MAX_MAC_OVERRIDES];
 static int i2c_speed_mac_count = 0;
 module_param_array(i2c_speed_mac, charp, &i2c_speed_mac_count, 0644);
-MODULE_PARM_DESC(i2c_speed_mac, "Per-card I2C speed by MAC address (format: \"0x1234567890ab:9\")");
+MODULE_PARM_DESC(i2c_speed_mac, "Per-card I2C speed by the card MAC address as it is logged "
+								 "(format: \"00:22:ab:12:34:56:9\" or \"0x0022ab123456:9\"); applied after the "
+								 "frontends have been attached");
 
 struct mac_speed_override {
 	u64 mac;
@@ -102,11 +109,19 @@ static void parse_mac_overrides(void)
 	mac_override_count = 0;
 
 	for (i = 0; i < i2c_speed_mac_count && i < MAX_MAC_OVERRIDES; i++) {
+		const char *colon;
+		u8 addr[ETH_ALEN];
+
 		if (!i2c_speed_mac[i])
 			continue;
 
-		/* Parse "0x1234567890ab:9" format */
-		mac = simple_strtoull(i2c_speed_mac[i], &endp, 0);
+		/* Parse "00:22:ab:12:34:56:9" or "0x0022ab123456:9" format */
+		colon = strrchr(i2c_speed_mac[i], ':');
+		if (colon && colon - i2c_speed_mac[i] == 17 && mac_pton(i2c_speed_mac[i], addr)) {
+			mac = ether_addr_to_u64(addr);
+			endp = (char *)colon;
+		} else
+			mac = simple_strtoull(i2c_speed_mac[i], &endp, 0);
 		if (*endp != ':') {
 			pr_err("tbsecp3: Invalid MAC override format: %s (expected 'mac:speed')\n",
 			       i2c_speed_mac[i]);
@@ -127,6 +142,17 @@ static void parse_mac_overrides(void)
 	}
 }
 
+/*
+	The card MAC as the number that i2c_speed_mac uses. card_mac_address holds the
+	MAC bytes in the order in which they were read (this is how it is passed on to
+	user space); the override reads like the MAC that is logged: 00:22:ab:12:34:56
+	is 0x0022ab123456.
+ */
+static u64 card_mac_id(struct tbsecp3_dev *dev)
+{
+	return ether_addr_to_u64((const u8 *)&dev->card_mac_address);
+}
+
 /* Determine I2C speed for a given card - checks overrides in priority order:
  * 1. Per-card MAC address override (highest priority)
  * 2. Per-board-type override
@@ -139,7 +165,7 @@ static u32 get_i2c_speed_for_card(struct tbsecp3_dev *dev, const char** source)
 {
 	int i;
 	u16 board_id = dev->info->board_id;
-	u64 mac = dev->card_mac_address;
+	u64 mac = dev->card_mac_address ? card_mac_id(dev) : 0;
 	u32 speed;
 
 	/* Priority 1: Check per-card MAC override */
@@ -325,8 +351,8 @@ void tbsecp3_i2c_reg_init(struct tbsecp3_dev *dev)
 
 	baud = get_i2c_speed_for_card(dev, &source);
 	dev->i2c_baud = baud;
-	dev_info(&dev->pci_dev->dev, "%s (board %u, MAC 0x%012llx) i2c_speed=%u (~%u kHz, %s)\n",
-					 dev->info->short_name, dev->info->board_id, dev->card_mac_address, baud,
+	dev_info(&dev->pci_dev->dev, "%s (board %u) i2c_speed=%u (~%u kHz, %s)\n",
+					 dev->info->short_name, dev->info->board_id, baud,
 					 125000 / 4 / baud / 2 / 4, source);
 
 	for (i = 0; i < 4; i++) {
@@ -347,10 +373,15 @@ void tbsecp3_i2c_update_speed(struct tbsecp3_dev *dev)
 	const char* source;
 	u32 baud = get_i2c_speed_for_card(dev, &source);
 
+	/* the card MAC in the form that i2c_speed_mac expects */
+	dev_info(&dev->pci_dev->dev, "%s card MAC %pM%s\n", dev->info->short_name,
+					 &dev->card_mac_address,
+					 mac_override_count > 0 && strcmp(source, "MAC override") ?
+					 " (no i2c_speed_mac entry for this card)" : "");
 	if (baud == dev->i2c_baud)
 		return;
-	dev_info(&dev->pci_dev->dev, "%s (MAC 0x%012llx) changing i2c_speed %u -> %u (~%u kHz, %s)\n",
-					 dev->info->short_name, dev->card_mac_address, dev->i2c_baud, baud,
+	dev_info(&dev->pci_dev->dev, "%s changing i2c_speed %u -> %u (~%u kHz, %s)\n",
+					 dev->info->short_name, dev->i2c_baud, baud,
 					 125000 / 4 / baud / 2 / 4, source);
 	for (i = 0; i < 4; i++) {
 		mutex_lock(&dev->i2c_bus[i].lock);

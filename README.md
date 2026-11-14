@@ -110,9 +110,10 @@ unload the modules and then reload them. For example:
     # more modules may need to be reloaded
 ```
 
-Check /var/log/debug for messages. If there are i2c_xfer error messages, try editing
-the file tbsecp3-cards.c. In that file lcate the entry for your card and change i2c_speed
-to 9.
+Check /var/log/debug for messages. If there are i2c_xfer error messages, try a lower i2c
+speed, e.g. 9: either set it with a module parameter of tbsecp3 (see the section "I2C
+speed of tbsecp3 cards"), or edit the file tbsecp3-cards.c. In that file locate the entry for
+your card and change i2c_speed to 9.
 
 # Checking that it works
 ```
@@ -166,6 +167,26 @@ through the sysfs interface it is possible to obtain more information about
 the cards and what they are doing. Also it is possible to slightly enhance using existing
 programs, such as tvheadend.
 
+
+## I2C speed of tbsecp3 cards
+The i2c speed of the cards handled by tbsecp3 is a divider: the bus runs at
+125000 / 4 / speed / 2 / 4 kHz, e.g. 3 = 1302 kHz, 4 = 977 kHz, 9 = 434 kHz, 39 = 100 kHz.
+Besides the default of each card in tbsecp3-cards.c it can be set with module parameters,
+e.g. in /etc/modprobe.d/tbsecp3.conf:
+```
+options tbsecp3 i2c_speed=9                        # all cards
+options tbsecp3 i2c_speed_board=22:4               # all cards of one type (board id:speed)
+options tbsecp3 i2c_speed_mac=00:22:ab:12:34:56:4  # one card (card MAC:speed)
+```
+Several entries are separated by commas. An entry for the card MAC takes precedence over an entry
+for the board type, which takes precedence over i2c_speed, which takes precedence over the default
+of the card. When a card is probed, tbsecp3 logs its board id with the i2c speed, and once the
+frontends have been attached it logs the card MAC in the form i2c_speed_mac expects
+("TBS 6909X card MAC 00:22:ab:12:34:56"). The MAC can also be given as a number,
+0x0022ab123456. Because the card MAC is only known after the frontends have been attached, the
+frontends are initialised with the speed for the board type (or i2c_speed, or the default) and an
+entry for the card MAC only applies after that; if a card does not initialise at its default
+speed, use i2c_speed_board or i2c_speed.
 
 ## Additional information and configuration via sysfs
 * Through /sys/module/stid135/... it is possible to figure out which adapter belongs to which
@@ -837,8 +858,9 @@ for many cards:
 sudo modprobe tbsecp3
 ```
 
-Check /var/log/debug for messages. If there are i2c_xfer error messages, try editing
-the file tbsecp3-cards.c. In that file lcate the entry for your card and change i2c_speed
-to 9.
+Check /var/log/debug for messages. If there are i2c_xfer error messages, try a lower i2c
+speed, e.g. 9: either set it with a module parameter of tbsecp3 (see the section "I2C
+speed of tbsecp3 cards"), or edit the file tbsecp3-cards.c. In that file locate the entry for
+your card and change i2c_speed to 9.
 
 If you have this problem then report it. Also report if the solution works,
