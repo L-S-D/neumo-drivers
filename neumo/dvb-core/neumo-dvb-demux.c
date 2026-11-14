@@ -2954,11 +2954,23 @@ int neumo_dvb_dmx_init(struct neumo_dvb_demux *dvbdemux)
 	dvbdemux->default_stream_id = -1;
 
 	dvbdemux->fe_feeds = kzalloc(sizeof(struct neumo_dvb_demux_feeds), GFP_KERNEL);
+	dvbdemux->default_feeds = kzalloc(sizeof(struct neumo_dvb_demux_feeds), GFP_KERNEL);
+	if (!dvbdemux->fe_feeds || !dvbdemux->default_feeds) {
+		kfree(dvbdemux->fe_feeds);
+		kfree(dvbdemux->default_feeds);
+		dvbdemux->fe_feeds = NULL;
+		dvbdemux->default_feeds = NULL;
+		vfree(dvbdemux->feedarray);
+		dvbdemux->feedarray = NULL;
+		vfree(dvbdemux->section_filter);
+		dvbdemux->section_filter = NULL;
+		return -ENOMEM;
+	}
+
 	dvb_demux_feeds_init(dvbdemux->fe_feeds, dvbdemux, -1, -1);
 	dvbdemux->fe_feeds->demux = dvbdemux;
 	dvbdemux->fe_feeds->include_default_feeds = true; //for legacy applications
 
-	dvbdemux->default_feeds = kzalloc(sizeof(struct neumo_dvb_demux_feeds), GFP_KERNEL);
 	dvb_demux_feeds_init(dvbdemux->default_feeds, dvbdemux, -1, -1);
 	dvbdemux->default_feeds->demux = dvbdemux;
 
