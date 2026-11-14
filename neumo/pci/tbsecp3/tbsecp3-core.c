@@ -27,7 +27,7 @@ MODULE_PARM_DESC(cimode,
 	"set the ci mode,0=Tuners and CAMs are separated into mulitple adapters, \
 	 1= Tuner and cam in same adapters");
 
-struct workqueue_struct *tbs_wq;   //sec
+static struct workqueue_struct *tbs_wq;   //sec
 
 #define dprintk(fmt, arg...)																					\
 	printk(KERN_DEBUG pr_fmt("%s:%d " fmt), __func__, __LINE__, ##arg)
@@ -85,23 +85,27 @@ static irqreturn_t tbsecp3_irq_handler(int irq, void *dev_id)
 				}
 			}
 		} else { // sec
-			if (stat & 0x8000){ //dma3 status
+			/* NULL with cimode=1, or when the CI could not be set up */
+			struct tbsecp3_ci *ci0 = READ_ONCE(dev->adapter[nr].tbsci);
+			struct tbsecp3_ci *ci1 = READ_ONCE(dev->adapter[nr+1].tbsci);
+
+			if ((stat & 0x8000) && ci1){ //dma3 status
 				//outchannelprocess(dev,1);
-				queue_work(tbs_wq,&dev->adapter[nr+1].tbsci->write_work);
+				queue_work(tbs_wq,&ci1->write_work);
 			}
 
-			if (stat & 0x4000){ //dma2 status
-				queue_work(tbs_wq,&dev->adapter[nr].tbsci->write_work);
+			if ((stat & 0x4000) && ci0){ //dma2 status
+				queue_work(tbs_wq,&ci0->write_work);
 				//outchannelprocess(dev,0);
 			}
 
-			if (stat & 0x2000){ //dma1 status
-				queue_work(tbs_wq,&dev->adapter[nr+1].tbsci->read_work);
+			if ((stat & 0x2000) && ci1){ //dma1 status
+				queue_work(tbs_wq,&ci1->read_work);
 				//TBS_PCIE_WRITE(int_adapter, 0x04, 0x00000001);
 			}
 
-			if (stat & 0x1000){ //dma0 status
-				queue_work(tbs_wq,&dev->adapter[nr].tbsci->read_work);
+			if ((stat & 0x1000) && ci0){ //dma0 status
+				queue_work(tbs_wq,&ci0->read_work);
 				//TBS_PCIE_WRITE(int_adapter, 0x04, 0x00000001);
 			}
 		}
@@ -519,7 +523,31 @@ static struct pci_driver tbsecp3_driver = {
 	.suspend  = NULL,
 };
 
-module_pci_driver(tbsecp3_driver);
+/*
+	The workqueue for the dma interrupts of the CI (sec) devices of the TBS 6910X,
+	queued from the interrupt handler
+ */
+static int __init tbsecp3_init(void)
+{
+	int ret;
+
+	tbs_wq = alloc_ordered_workqueue("tbsecp3_ci", 0);
+	if (!tbs_wq)
+		return -ENOMEM;
+	ret = pci_register_driver(&tbsecp3_driver);
+	if (ret)
+		destroy_workqueue(tbs_wq);
+	return ret;
+}
+
+static void __exit tbsecp3_exit(void)
+{
+	pci_unregister_driver(&tbsecp3_driver);
+	destroy_workqueue(tbs_wq);
+}
+
+module_init(tbsecp3_init);
+module_exit(tbsecp3_exit);
 
 MODULE_AUTHOR("Luis Alves <ljalvs@gmail.com>");
 MODULE_DESCRIPTION("TBS ECP3 driver");
