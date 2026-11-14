@@ -10430,6 +10430,7 @@ fe_lla_error_t fe_stid135_get_soc_temperature(struct fe_stid135_internal_param* 
 	data_ready = (reg_value>>10) & 0x1;
 	while((data_ready != 1) && (timeout < soc_temp_timeout)) {
 		timeout = (u16)(timeout + 5);
+		usleep_range(1000, 2000); //do not poll the i2c bus without a pause
 		error |= ChipGetOneRegister(pParams->handle_soc, (u16)REG_RSTID135_C9THS_GLUE_TOP_TSENSOR_STATUS, &reg_value);
 		data_ready = (reg_value>>10) & 0x1;
 	}

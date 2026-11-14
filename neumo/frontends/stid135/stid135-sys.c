@@ -517,9 +517,11 @@ static ssize_t stv_temperature_show(struct kobject *kobj, struct kobj_attribute 
 	lock = &chip->lock;
 	mutex_lock(&lock->mutex);
 	err = fe_stid135_get_soc_temperature(&chip->ip, &temperature);
+	mutex_unlock(&lock->mutex);
+	if (err)
+		return -EIO; //temperature is not (or not correctly) set
 
 	ret += sprintf(buf+ret, "%d\n", temperature);
-	mutex_unlock(&lock->mutex);
 	return ret;
 }
 
