@@ -495,6 +495,7 @@ bool card_is_locked_by_state(struct stv* state);
 
 void state_chip_lock_(struct stv* state, const char* func, int line);
 void chip_chip_lock_(struct stv_chip_t* chip, const char* func, int line);
+int chip_chip_trylock_(struct stv_chip_t* chip, const char* func, int line);
 int state_chip_trylock_(struct stv* state, const char* func, int line);
 void state_chip_unlock_(struct stv* state, const char* func, int line);
 void chip_chip_unlock_(struct stv_chip_t* chip, const char* func, int line);
@@ -520,8 +521,11 @@ void state_chip_sleep_(struct stv* state, int timems, const char* func, int line
 #define state_chip_lock(state) \
 	state_chip_lock_(state, __func__, __LINE__)
 
-#define chip_chip_lock(state) \
+#define chip_chip_lock(chip) \
 	chip_chip_lock_(chip, __func__, __LINE__)
+
+#define chip_chip_trylock(chip) \
+	chip_chip_trylock_(chip, __func__, __LINE__)
 
 #define state_chip_trylock(state)										\
 	state_chip_trylock_(state, __func__, __LINE__)
@@ -529,7 +533,7 @@ void state_chip_sleep_(struct stv* state, int timems, const char* func, int line
 #define state_chip_unlock(state) \
 	state_chip_unlock_(state, __func__, __LINE__)
 
-#define chip_chip_unlock(state) \
+#define chip_chip_unlock(chip) \
 	chip_chip_unlock_(chip, __func__, __LINE__)
 
 #define state_chip_sleep(state, time)											\

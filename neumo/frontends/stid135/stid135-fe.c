@@ -855,11 +855,17 @@ static enum fe_ioctl_result stid135_select_rf_in_(struct stv* state, struct fe_r
 		if(!old_chip || old_rf_in_no <0) {
 			state_dprintk("BUG: chip=%p old_chip=%p old_rf_in_no=%d\n", state->chip, old_chip, old_rf_in_no);
 		} else {
-			bool must_lock = (old_chip != state->chip) && !state_chip_is_locked_by_state(state);
-			if(must_lock)
-				chip_chip_lock(old_chip);
-			err = fe_stid135_set_22khz_cont(&old_chip->ip, old_rf_in_no + 1, false);
-			if(must_lock)
+			/* Another chip controls the rf_in (tbs6916). Its mutex must not be
+			 * waited for under the card lock (the lock order is chip, then card):
+			 * try it, and leave the tone on if that chip is busy. The voltage of
+			 * the rf_in goes off below anyway. */
+			bool other_chip = (old_chip != state->chip);
+			bool locked = other_chip && chip_chip_trylock(old_chip);
+			if(!other_chip || locked)
+				err = fe_stid135_set_22khz_cont(&old_chip->ip, old_rf_in_no + 1, false);
+			else
+				state_dprintk("chip %d busy: leaving the tone of rf_in=%d on\n", old_chip->chip_no, old_rf_in_no);
+			if(locked)
 				chip_chip_unlock(old_chip);
 			if(old_chip->set_voltage) {
 				state_dprintk("old rf_in no longer in use: rf_in=%d; VOLTAGE OFF\n", old_rf_in_no);

@@ -12815,6 +12815,19 @@ void chip_chip_lock_(struct stv_chip_t* chip, const char*func, int line) {
 #endif
 }
 
+int chip_chip_trylock_(struct stv_chip_t* chip, const char*func, int line) {
+	struct lock_t* lock = &chip->lock;
+	int ret = mutex_trylock(&lock->mutex);
+	if(ret) {
+		lock->func = func;
+		lock->line = line;
+		lock->demod = -1;
+		lock->chip_no = chip->chip_no;
+		lock->lock_time = ktime_get_boottime();
+	}
+	return ret;
+}
+
 void chip_chip_unlock_(struct stv_chip_t* chip, const char* func, int line) {
 	struct lock_t* lock = &chip->lock;
 	int64_t delta=ktime_ms_delta(ktime_get_boottime(), lock->lock_time);
