@@ -239,6 +239,7 @@ struct tbsecp3_adapter {
 	spinlock_t adap_lock;
 	struct tasklet_struct tasklet;
 	struct tbsecp3_dma_channel dma;
+	bool dma_stopped; /* set by tbsecp3_dma_stop(); the tasklet no longer touches the demux */
 
 	/* ca interface */
 	struct tbsecp3_ca *tbsca;
@@ -301,6 +302,7 @@ extern void tbsecp3_dma_free(struct tbsecp3_dev *dev);
 extern void tbsecp3_dma_reg_init(struct tbsecp3_dev *dev);
 extern void tbsecp3_dma_enable(struct tbsecp3_adapter *adap);
 extern void tbsecp3_dma_disable(struct tbsecp3_adapter *adap);
+extern void tbsecp3_dma_stop(struct tbsecp3_adapter *adap);
 
 /* tbsecp3-ca.c */
 int tbsecp3_ca_init(struct tbsecp3_adapter *adap, int nr);

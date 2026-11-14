@@ -53,6 +53,12 @@ static void tbsecp3_dma_tasklet(unsigned long adap)
 
 	spin_lock(&adapter->adap_lock);
 
+	/* the adapter is being detached; its demux may already be released */
+	if (adapter->dma_stopped) {
+		spin_unlock(&adapter->adap_lock);
+		return;
+	}
+
 	if (adapter->dma.cnt < TBSECP3_DMA_PRE_BUFFERS)
 	{
 		next_buffer = (tbs_read(adapter->dma.base, TBSECP3_DMA_STAT) - TBSECP3_DMA_PRE_BUFFERS + 1) & (TBSECP3_DMA_BUFFERS - 1);
@@ -120,6 +126,20 @@ void tbsecp3_dma_disable(struct tbsecp3_adapter *adap)
 	tbs_write(TBSECP3_INT_BASE, TBSECP3_DMA_IE(adap->cfg->ts_in), 0);
 	tbs_write(adap->dma.base, TBSECP3_DMA_EN, 0);
 	spin_unlock_irq(&adap->adap_lock);
+}
+
+/*
+	Stop the dma of an adapter for good before its demux is released: an
+	interrupt may already have scheduled the tasklet, and the interrupt
+	status may still report the channel after the dma has been disabled.
+ */
+void tbsecp3_dma_stop(struct tbsecp3_adapter *adap)
+{
+	tbsecp3_dma_disable(adap);
+	spin_lock_irq(&adap->adap_lock);
+	adap->dma_stopped = true;
+	spin_unlock_irq(&adap->adap_lock);
+	tasklet_kill(&adap->tasklet);
 }
 
 void tbsecp3_dma_reg_init(struct tbsecp3_dev *dev)

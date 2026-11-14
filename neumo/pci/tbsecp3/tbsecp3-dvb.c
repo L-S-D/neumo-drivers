@@ -3119,6 +3119,8 @@ void tbsecp3_dvb_exit(struct tbsecp3_adapter *adapter)
 	if(adapter) {
 		dprintk("Calling neumo_dvb_dmx_release\n");
 		neumo_dvb_dmxdev_release(&adapter->dmxdev);
+		/* all feeds are stopped; keep the dma tasklet away from the demux */
+		tbsecp3_dma_stop(adapter);
 		neumo_dvb_dmx_release(&adapter->demux);
 	}
 	if(adap) {
