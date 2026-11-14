@@ -274,8 +274,11 @@ static ssize_t stv_blindscan_always_show(struct kobject *kobj, struct kobj_attri
 																							 char *buf)
 {
 	struct stv_card_t* card = find_card(kobj);
-	int blindscan_always = card->blindscan_always;
+	int blindscan_always;
 	int ret=0;
+	if (!card)
+		return -ENODEV;
+	blindscan_always = card->blindscan_always;
 	ret += sprintf(buf+ret, "%d\n", blindscan_always);
 	return ret;
 }
@@ -285,6 +288,8 @@ static ssize_t stv_blindscan_always_store(struct kobject* kobj, struct kobj_attr
 	int blindscan_always = 0;
 	sscanf(buf,"%d",&blindscan_always);
 	struct stv_card_t* card = find_card(kobj);
+	if (!card)
+		return -ENODEV;
 	card->blindscan_always = blindscan_always;
 	dprintk("Set blindscan_always=%d\n", blindscan_always);
 	return count;
@@ -372,7 +377,10 @@ static ssize_t stv_chip_registers_show(struct file* filp, struct kobject *kobj, 
 	ssize_t ret=0;
 	const char *p="???";
 	struct stv_chip_t* chip = find_chip(kobj->parent);
-	struct lock_t* lock = &chip->lock;
+	struct lock_t* lock;
+	if (!chip)
+		return -ENODEV;
+	lock = &chip->lock;
 	mutex_lock(&lock->mutex);
 	if (bin_attr == &stv_chip_sysfs_registers_stid135_attribute) {
 		dprintk("READ %lu bytes at offset %llu stid135\n", size, pos);
@@ -408,7 +416,10 @@ static ssize_t stv_chip_registers_store(struct file* filp, struct kobject *kobj,
 	ssize_t ret=0;
 	const char *p="???";
 	struct stv_chip_t* chip = find_chip(kobj->parent);
-	struct lock_t* lock = &chip->lock;
+	struct lock_t* lock;
+	if (!chip)
+		return -ENODEV;
+	lock = &chip->lock;
 	mutex_lock(&lock->mutex);
 	if (bin_attr == &stv_chip_sysfs_registers_stid135_attribute) {
 		dprintk("WRITE %lu bytes at offset %llu\n", size, pos);
@@ -497,10 +508,13 @@ static ssize_t stv_temperature_show(struct kobject *kobj, struct kobj_attribute 
 		will never happen you can use sprintf() otherwise you must use
 		scnprintf().*/
 	struct stv_chip_t* chip = find_chip(kobj);
-	struct lock_t* lock = &chip->lock;
+	struct lock_t* lock;
 	int err;
 	s16 temperature;
 	int ret=0;
+	if (!chip)
+		return -ENODEV;
+	lock = &chip->lock;
 	mutex_lock(&lock->mutex);
 	err = fe_stid135_get_soc_temperature(&chip->ip, &temperature);
 
@@ -594,8 +608,11 @@ static ssize_t stv_demod_show_default_rf_input(struct kobject *kobj, struct kobj
 		will never happen you can use sprintf() otherwise you must use
 		scnprintf().*/
 	struct stv* state = find_demod(kobj);
-	int default_rf_input = state->fe.ops.info.default_rf_input;
+	int default_rf_input;
 	int ret=0;
+	if (!state)
+		return -ENODEV;
+	default_rf_input = state->fe.ops.info.default_rf_input;
 	ret += sprintf(buf+ret, "%d\n", default_rf_input);
 	return ret;
 }
@@ -605,6 +622,8 @@ static ssize_t stv_demod_set_default_rf_input(struct kobject* kobj, struct kobj_
 	int default_rf_input = 0;
 	sscanf(buf,"%d",&default_rf_input);
 	struct stv* state = find_demod(kobj);
+	if (!state)
+		return -ENODEV;
 	state->fe.ops.info.default_rf_input = default_rf_input;
 	state_dprintk("Set default_rf_input=%d\n", default_rf_input);
 	return count;
