@@ -1563,7 +1563,7 @@ static int neumo_dvb_demux_release(struct inode *inode, struct file *file)
 {
 	struct neumo_dmxdev_filter *dmxdevfilter = file->private_data;
 	if(!dmxdevfilter) {
-		dmxdev_dprintk(dmxdevfilter->dev, "ERROR inode=%p file=%p dmxdevfilter=%p\n", inode, file, dmxdevfilter);
+		dprintk("ERROR inode=%p file=%p dmxdevfilter=%p\n", inode, file, dmxdevfilter);
 		return -1;
 	}
 	struct neumo_dmxdev *dmxdev = dmxdevfilter->dev;
