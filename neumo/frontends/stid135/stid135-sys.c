@@ -624,6 +624,9 @@ static ssize_t stv_demod_set_default_rf_input(struct kobject* kobj, struct kobj_
 	struct stv* state = find_demod(kobj);
 	if (!state)
 		return -ENODEV;
+	/* the legacy rf_in selection uses it as index of the tuners and rf_ins */
+	if (default_rf_input < 0 || default_rf_input >= state->chip->num_tuners)
+		return -EINVAL;
 	state->fe.ops.info.default_rf_input = default_rf_input;
 	state_dprintk("Set default_rf_input=%d\n", default_rf_input);
 	return count;
