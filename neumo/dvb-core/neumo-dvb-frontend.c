@@ -3125,7 +3125,7 @@ static int dtv_set_sat_scan(struct neumo_dvb_frontend* fe, bool scan_continue)
 static int dtv_get_pls_search_list(struct neumo_dvb_frontend* fe, struct dtv_pls_search_list* user)
 {
 	struct neumo_dtv_frontend_properties *c = &fe->dtv_property_cache;
-	int len = c->pls_search_codes_len;
+	int len = min_t(int, c->pls_search_codes_len, ARRAY_SIZE(c->pls_search_codes));
 	if(user->num_codes < len)
 		len = user->num_codes;
 	if(user->codes == NULL || len <=0)
@@ -3180,12 +3180,14 @@ static int dtv_set_spectrum(struct neumo_dvb_frontend* fe, enum dtv_fe_spectrum_
 static int dtv_get_modcod_list(struct neumo_dvb_frontend* fe, struct dtv_modcod_list* user)
 {
 	struct neumo_dtv_frontend_properties *c = &fe->dtv_property_cache;
+	/* the count comes from the frontend driver; do not copy beyond the array */
+	u32 num = clamp_t(int, c->num_modcods, 0, ARRAY_SIZE(c->modcod_entries));
 
 	if(!user)
 		return -1;
 
-	if(user->num_entries > c->num_modcods)
-		user->num_entries = c->num_modcods;
+	if(user->num_entries > num)
+		user->num_entries = num;
 
 	if(copy_to_user((void __user *)user->entries, c->modcod_entries,
 									user->num_entries * sizeof(user->entries[0])))
@@ -3237,12 +3239,14 @@ static int dtv_get_matype_list(struct neumo_dvb_frontend* fe, struct dtv_matype_
 {
 	//fe_dprintk(fe, "constellation retrieved user->num_samples=%d\n", user->num_samples);
 	struct neumo_dtv_frontend_properties *c = &fe->dtv_property_cache;
+	/* the count comes from the frontend driver; do not copy beyond the array */
+	u32 num = clamp_t(int, c->num_matypes, 0, ARRAY_SIZE(c->matypes));
 
 	if(!user)
 		return -1;
 
-	if(user->num_entries > c->num_matypes)
-		user->num_entries = c->num_matypes;
+	if(user->num_entries > num)
+		user->num_entries = num;
 
 	if(copy_to_user((void __user *)user->matypes, c->matypes,
 									user->num_entries * sizeof(user->matypes[0])))
