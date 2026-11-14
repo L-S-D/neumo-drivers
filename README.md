@@ -186,7 +186,8 @@ frontends have been attached it logs the card MAC in the form i2c_speed_mac expe
 0x0022ab123456. Because the card MAC is only known after the frontends have been attached, the
 frontends are initialised with the speed for the board type (or i2c_speed, or the default) and an
 entry for the card MAC only applies after that; if a card does not initialise at its default
-speed, use i2c_speed_board or i2c_speed.
+speed, use i2c_speed_board or i2c_speed. The former parameter tbs6909x_i2c_speed=4 is still
+accepted and means i2c_speed_board=22:4.
 
 ## Additional information and configuration via sysfs
 * Through /sys/module/stid135/... it is possible to figure out which adapter belongs to which

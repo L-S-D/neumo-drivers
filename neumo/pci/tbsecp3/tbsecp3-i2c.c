@@ -40,6 +40,11 @@ module_param_array(i2c_speed_board, charp, &i2c_speed_board_count, 0444);
 MODULE_PARM_DESC(i2c_speed_board, "Per-board-type I2C speed (format: \"board_id:speed\", e.g. \"22:4\" "
 								 "for the TBS 6909X; the board id is logged when a card is probed)");
 
+/* The former TBS 6909X parameter, replaced by i2c_speed_board; still accepted */
+static int tbs6909x_i2c_speed = 0;
+module_param(tbs6909x_i2c_speed, int, 0444);
+MODULE_PARM_DESC(tbs6909x_i2c_speed, "Deprecated, use i2c_speed_board=22:speed instead");
+
 /*
 	Per-card MAC address overrides (format: "mac_addr:speed,mac_addr:speed,...").
 	The MAC is the card MAC as it is logged after the frontends have been attached,
@@ -174,6 +179,15 @@ static void parse_speed_params(void)
 		       i2c_speed, I2C_SPEED_MIN, I2C_SPEED_MAX);
 		i2c_speed = 0;
 	}
+	if (tbs6909x_i2c_speed) {
+		if (tbs6909x_i2c_speed < I2C_SPEED_MIN || tbs6909x_i2c_speed > I2C_SPEED_MAX) {
+			pr_err("tbsecp3: Invalid tbs6909x_i2c_speed=%d ignored (expected %d..%d)\n",
+			       tbs6909x_i2c_speed, I2C_SPEED_MIN, I2C_SPEED_MAX);
+			tbs6909x_i2c_speed = 0;
+		} else
+			pr_warn("tbsecp3: tbs6909x_i2c_speed is deprecated, use i2c_speed_board=%d:%d\n",
+			        TBSECP3_BOARD_TBS6909X, tbs6909x_i2c_speed);
+	}
 	parse_mac_overrides();
 	parse_board_overrides();
 }
@@ -223,6 +237,10 @@ static u32 get_i2c_speed_for_card(struct tbsecp3_dev *dev, const char** source)
 			*source = "board override";
 			return board_overrides[i].speed;
 		}
+	}
+	if (tbs6909x_i2c_speed > 0 && board_id == TBSECP3_BOARD_TBS6909X) {
+		*source = "tbs6909x_i2c_speed";
+		return tbs6909x_i2c_speed;
 	}
 
 	/* Priority 3: Check global override */
