@@ -50,36 +50,36 @@ static struct kobj_attribute stv_temperature_sysfs_attribute =__ATTR(temperature
 																																		 stv_temperature_show, store_none);
 
 static struct bin_attribute stv_chip_sysfs_registers_stid135_attribute ={
-	.attr = { .name ="stid135", .mode=0774},
+	.attr = { .name ="stid135", .mode=0600},
 	.size=0,
 	.read=stv_chip_registers_show,
 	.write=stv_chip_registers_store
 };
 
 static struct bin_attribute stv_chip_sysfs_registers_soc_attribute ={
-	.attr = { .name ="soc", .mode=0774},
+	.attr = { .name ="soc", .mode=0600},
 	.size=0,
 	.read=stv_chip_registers_show,
 	.write=stv_chip_registers_store
 };
 
 static struct bin_attribute stv_chip_sysfs_registers_vglna_attributes[] = {
-		{.attr = { .name ="vglna0", .mode=0774},
+		{.attr = { .name ="vglna0", .mode=0600},
 	.size=0,
 	.read=stv_chip_registers_show,
 	.write=stv_chip_registers_store
 	},
-	{.attr = { .name ="vglna1", .mode=0774},
+	{.attr = { .name ="vglna1", .mode=0600},
 	.size=0,
 	.read=stv_chip_registers_show,
 	.write=stv_chip_registers_store
 	},
-	{.attr = { .name ="vglna2", .mode=0774},
+	{.attr = { .name ="vglna2", .mode=0600},
 	.size=0,
 	.read=stv_chip_registers_show,
 	.write=stv_chip_registers_store
 	},
-	{.attr = { .name ="vglna3", .mode=0774},
+	{.attr = { .name ="vglna3", .mode=0600},
 	.size=0,
 	.read=stv_chip_registers_show,
 	.write=stv_chip_registers_store
