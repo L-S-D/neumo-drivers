@@ -2972,6 +2972,7 @@ EXPORT_SYMBOL(neumo_dvb_dmx_init);
 void neumo_dvb_dmx_release(struct neumo_dvb_demux *dvbdemux)
 {
 	kref_put(&dvbdemux->fe_feeds->refcount, dvb_demux_feeds_release_);
+	kref_put(&dvbdemux->default_feeds->refcount, dvb_demux_feeds_release_);
 	vfree(dvbdemux->section_filter);
 	dprintk("FREE dvbdemux->feedarray=%p dvbdemux=%p\n", dvbdemux->feedarray, dvbdemux);
 	vfree(dvbdemux->feedarray);
