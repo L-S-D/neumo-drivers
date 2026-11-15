@@ -1514,7 +1514,8 @@ static int stid135_set_parameters(struct neumo_dvb_frontend* fe)
 	dprintk("set state->signal_info pls_mode=0x%x pls_code=0x%x stream_id=0%x",
 					state->signal_info.pls_mode, state->signal_info.pls_code, p->stream_id);
 
-	if(	state->signal_info.pls_code ==0) {
+	//root 0 does not exist and means root 1; gold 0 is a valid code (the default sequence)
+	if(	state->signal_info.pls_mode == 0 && state->signal_info.pls_code ==0) {
 			state->signal_info.pls_code = 1;
 			state_dprintk("setting pls_code=1 was %d\n", state->signal_info.pls_code);
 	}
