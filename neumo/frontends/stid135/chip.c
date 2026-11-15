@@ -463,7 +463,8 @@ s32 ChipGetRegisterIndex(STCHIP_Info_t* hChip, u16 RegId)
 			{
 				/* We assume that reg addresses in STiD135DefVal and STiD135SocDefVal are sorted in the growing order */
 				regIndex = dichotomy_search(hChip->pRegMapImage, hChip->NbRegs, RegId);
-				hChip->LastRegIndex = regIndex;
+				if(regIndex >= 0) /* -1 would make the next access read pRegMapImage[-1] */
+					hChip->LastRegIndex = regIndex;
 			}
 		}
 		else
@@ -496,7 +497,8 @@ s32 ChipGetFieldIndex(STCHIP_Info_t* hChip, u32 FieldId)
 			{
 				/* We assume that reg addresses in STiD135DefVal and STiD135SocDefVal are sorted in the growing order */
 				regIndex = dichotomy_search(hChip->pRegMapImage, hChip->NbRegs, regAddress);
-				hChip->LastRegIndex = regIndex;
+				if(regIndex >= 0) /* -1 would make the next access read pRegMapImage[-1] */
+					hChip->LastRegIndex = regIndex;
 			}
 		}
 		else
