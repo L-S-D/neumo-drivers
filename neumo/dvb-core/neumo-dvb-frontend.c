@@ -3442,6 +3442,8 @@ static int dvb_frontend_handle_ioctl(struct file *file, unsigned int cmd, void *
 		break;
 	case FE_ECP3FW_WRITE:
 		//printk("FE_ECP3FW_WRITE *****************");
+		if (!capable(CAP_SYS_ADMIN))
+			return -EPERM;
 		if (fe->ops.spi_write) {
 			struct ecp3_info *info = parg;
 			fe->ops.spi_write(fe, info);
@@ -3452,6 +3454,9 @@ static int dvb_frontend_handle_ioctl(struct file *file, unsigned int cmd, void *
 
 	case FE_24CXX_READ:
 		//printk("FE_24CXX_READ *****************");
+		/* reads at a base address chosen by the caller */
+		if (!capable(CAP_SYS_ADMIN))
+			return -EPERM;
 		if (fe->ops.mcu_read) {
 			struct mcu24cxx_info *info = parg;
 			fe->ops.mcu_read(fe, info);
@@ -3460,6 +3465,8 @@ static int dvb_frontend_handle_ioctl(struct file *file, unsigned int cmd, void *
 		break;
 	case FE_24CXX_WRITE:
 		//printk("FE_24CXX_WRITE *****************");
+		if (!capable(CAP_SYS_ADMIN))
+			return -EPERM;
 		if (fe->ops.mcu_write) {
 			struct mcu24cxx_info *info = parg;
 			fe->ops.mcu_write(fe, info);
@@ -3475,6 +3482,8 @@ static int dvb_frontend_handle_ioctl(struct file *file, unsigned int cmd, void *
 		err = 0;
 		break;
 	case FE_REGI2C_WRITE:
+		if (!capable(CAP_SYS_ADMIN))
+			return -EPERM;
 		if (fe->ops.reg_i2cwrite) {
 			struct usbi2c_access *info = parg;
 			fe->ops.reg_i2cwrite(fe, info);
@@ -3489,6 +3498,8 @@ static int dvb_frontend_handle_ioctl(struct file *file, unsigned int cmd, void *
 		err = 0;
 		break;
 	case FE_EEPROM_WRITE:
+		if (!capable(CAP_SYS_ADMIN))
+			return -EPERM;
 		if (fe->ops.eeprom_write) {
 			struct eeprom_info *info = parg;
 			fe->ops.eeprom_write(fe, info);
