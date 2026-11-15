@@ -424,10 +424,27 @@ static void tbsecp3_remove(struct pci_dev *pdev)
 static int tbsecp3_resume(struct pci_dev *pdev)
 {
 	struct tbsecp3_dev *dev = pci_get_drvdata(pdev);
+	int i;
 	/* re-init registers */
 	tbsecp3_i2c_reg_init(dev);
 	tbsecp3_dma_reg_init(dev);
 	tbs_write(TBSECP3_INT_BASE, TBSECP3_INT_EN, 1);
+
+	/*
+	 * tbsecp3_dma_reg_init() has disabled all dma channels; start_feed()
+	 * only enables a channel for its first feed, so restart the channels
+	 * that still have feeds
+	 */
+	for (i = 0; i < dev->info->adapters; i++) {
+		struct tbsecp3_adapter *adapter = &dev->adapter[i];
+
+		if (adapter->nr == -1) /* attach has failed, no demux */
+			continue;
+		mutex_lock(&adapter->demux.mutex);
+		if (adapter->feeds > 0)
+			tbsecp3_dma_enable(adapter);
+		mutex_unlock(&adapter->demux.mutex);
+	}
 	return 0;
 }
 
