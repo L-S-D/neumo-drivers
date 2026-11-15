@@ -506,6 +506,9 @@ static int spectral_scan_init(spectrum_scan_state_t* ss, struct scan_internal_t*
 	if (!ss->spectrum || ss->spectrum_len ==0) {
 		return -ENOMEM;
 	}
+	if (ss->spectrum_len < 2)
+		return -EINVAL; //noise_est() needs two points
+
 	//spectra can have a million points, and peaks needs 224 kB
 	si->rs = kvcalloc(ss->spectrum_len, sizeof(si->rs[0]), GFP_KERNEL);
 	si->noise = kvcalloc(ss->spectrum_len, sizeof(si->noise[0]), GFP_KERNEL);
@@ -549,6 +552,9 @@ static int scan_level(spectrum_scan_state_t *ss, struct scan_internal_t *si,
 			//compute parameters of the candidate peak
 			process_candidate(ss, si, rise_idx, fall_idx);
 			if (check_candidate_tp(ss, si) >= 0) {
+				//full: the scan of the next window size would write beyond peaks
+				if (si->num_peaks >= si->max_num_peaks)
+					return -1;
 				si->peaks[si->num_peaks++] = si->last_peak;
 				if (si->num_peaks >= si->max_num_peaks)
 					return -1;
