@@ -55,6 +55,10 @@ extern int stid135_verbose;
 #define vprintk(fmt, arg...)																						\
 	if(stid135_verbose) printk(KERN_DEBUG pr_fmt("%s:%d " fmt),  __func__, __LINE__, ##arg)
 
+/* positions of the RF AGC registers of the tuner in the table saved below */
+#define FFT_REG_AGCRF_BETA 20
+#define FFT_REG_AGCRFREF 23
+
 /*****************************************************
 --FUNCTION	::	fe_stid135_fft_save_registers
 --ACTION	::	save registers prior to callling FFT
@@ -210,13 +214,22 @@ static fe_lla_error_t fe_stid135_fft_save_registers(struct stv* state, FE_OXFORD
 --PARAMS OUT	::	Reg[] -> table of stored registers
 --RETURN	::	Error (if any)
 --***************************************************/
+/* Called with a tuner reserved (state->active_tuner); fe_stid135_term_fft must
+	 follow with the same tuner, also if this returns an error */
 static fe_lla_error_t fe_stid135_init_fft(struct stv*state, int fft_mode, s32 Reg[60])
 {
 	fe_lla_error_t error = FE_LLA_NO_ERROR;
 	struct fe_stid135_internal_param *pParams = &state->chip->ip;
 	enum fe_stid135_demod path = state->nr+1;
 	int rf_in = active_rf_in_no(state);
+	struct stv_tuner_t* tuner = state->active_tuner;
 	error |= fe_stid135_fft_save_registers(state, rf_in+1, Reg);
+	/* The RF AGC belongs to the tuner, which other demods share, and which may
+		 already be frozen by them: save it only for the first FFT user */
+	if(tuner->fft_users++ == 0) {
+		tuner->fft_agcrf_beta = Reg[FFT_REG_AGCRF_BETA];
+		tuner->fft_agcrfref = Reg[FFT_REG_AGCRFREF];
+	}
 	/* ADJUSTEMENT REGISTERS BEFORE FFT  */
 
 	/* Choix du mode de fonctionnement de la cellule FFT */
@@ -398,14 +411,15 @@ static fe_lla_error_t fe_stid135_init_fft(struct stv*state, int fft_mode, s32 Re
 --PARAMS OUT	::	NONE
 --RETURN	::	Error (if any)
 --***************************************************/
-static fe_lla_error_t fe_stid135_term_fft(struct stv* state, s32 Reg[60])
+static fe_lla_error_t fe_stid135_term_fft(struct stv* state, struct stv_tuner_t* tuner, s32 Reg[60])
 {
 	u32 i=0;
 
 	fe_lla_error_t error = FE_LLA_NO_ERROR;
 	struct fe_stid135_internal_param *pParams = &state->chip->ip;
 	enum fe_stid135_demod path = state->nr+1;
-	int rf_in = active_rf_in_no(state);
+	int rf_in = tuner->tuner_no; //the tuner of fe_stid135_init_fft, even if the rf_in changed since
+	bool last_fft_user = (--tuner->fft_users == 0);
 	/* Restore params */
 	error |= ChipSetField (pParams->handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_HDEBITCFG0_FIFO2_ULTRABS(path), Reg[i++]);
 	error |= ChipSetField (pParams->handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_HDEBITCFG2_MODE_HAUTDEBIT(path), Reg[i++]);
@@ -440,11 +454,18 @@ static fe_lla_error_t fe_stid135_term_fft(struct stv* state, s32 Reg[60])
 	error |= ChipSetOneRegister(pParams->handle_demod, (u16)REG_RC8CODEW_DVBSX_DEMOD_AGC2I1(path), (u32)Reg[i++]);
 	error |= ChipSetOneRegister(pParams->handle_demod, (u16)REG_RC8CODEW_DVBSX_DEMOD_AGC2I0(path), (u32)Reg[i++]);
 
-	error |= ChipSetField(pParams->handle_demod, FLD_FC8CODEW_DVBSX_AGCRF_AGCRFCFG_AGCRF_BETA(rf_in+1), (u32)Reg[i++]);
+	//the RF AGC of the tuner stays frozen as long as another demod uses the FFT
+	if(last_fft_user)
+		error |= ChipSetField(pParams->handle_demod, FLD_FC8CODEW_DVBSX_AGCRF_AGCRFCFG_AGCRF_BETA(rf_in+1),
+													(u32)tuner->fft_agcrf_beta);
+	i++;
 	error |= ChipSetField(pParams->handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_AGC1CFG_AMM_FROZEN(path), (u32)Reg[i++]);
 	error |= ChipSetField(pParams->handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_AGC1CFG_QUAD_FROZEN(path), (u32)Reg[i++]);
 
-	error |= ChipSetOneRegister(pParams->handle_demod, (u16)REG_RC8CODEW_DVBSX_AGCRF_AGCRFREF(rf_in+1), (u32)Reg[i++]);
+	if(last_fft_user)
+		error |= ChipSetOneRegister(pParams->handle_demod, (u16)REG_RC8CODEW_DVBSX_AGCRF_AGCRFREF(rf_in+1),
+																(u32)tuner->fft_agcrfref);
+	i++;
 	error |= ChipSetField(pParams->handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_AGC1CN_AGCIQ_BETA(path), (u32)Reg[i++]);
 
 	error |= ChipSetOneRegister(pParams->handle_demod, (u16)REG_RC8CODEW_DVBSX_DEMOD_AGC1AMM(path), (u32) Reg[i++]);
@@ -858,11 +879,17 @@ static int get_spectrum_scan_fft(struct neumo_dvb_frontend *fe)
 	s32 start_idx, end_idx;
 	u64 spectrum_len;
 	bool fft_started = false;
+	struct stv_tuner_t* tuner = state->active_tuner;
 	ss->spectrum_present = false;
 
 	if(p->scan_end_frequency < p->scan_start_frequency) {
 		vprintk("FULLY DONE\n");
 		return -1; //fully done
+	}
+
+	if(rf_in < 0 || !tuner) {
+		dprintk("demod=%d: no tuner reserved\n", state->nr);
+		return -EINVAL;
 	}
 
 	state_chip_unlock(state);
@@ -1077,7 +1104,7 @@ static int get_spectrum_scan_fft(struct neumo_dvb_frontend *fe)
 	if(!fft_started)
 		return error; //nothing to restore: Reg[] was never filled
 
-	error |= (error1=fe_stid135_term_fft(state, Reg));
+	error |= (error1=fe_stid135_term_fft(state, tuner, Reg));
 
 	dprintk("demod=%d: Terminated fft err=%d\n", state->nr, error1);
 	if(error) {
@@ -1167,8 +1194,16 @@ int stid135_agc_lock(struct neumo_dvb_frontend *fe)
 		return -EBUSY;
 	}
 
+	if (!active_rf_in(state)) {
+		dprintk("demod=%d: AGC lock without a reserved tuner\n", state->nr);
+		return -EINVAL;
+	}
+
 	state_chip_lock(state);
+	state->fft_agc_tuner = state->active_tuner;
 	error = fe_stid135_init_fft(state, fft_mode, state->fft_agc_regs);
+	if (error) //restore what was changed
+		fe_stid135_term_fft(state, state->fft_agc_tuner, state->fft_agc_regs);
 	state_chip_unlock(state);
 
 	if (error) {
@@ -1199,15 +1234,17 @@ int stid135_agc_unlock(struct neumo_dvb_frontend *fe)
 	}
 
 	state_chip_lock(state);
-	error = fe_stid135_term_fft(state, state->fft_agc_regs);
+	error = fe_stid135_term_fft(state, state->fft_agc_tuner, state->fft_agc_regs);
 	state_chip_unlock(state);
+	//the registers were restored as far as possible: do not restore them twice
+	state->fft_agc_locked = false;
+	state->fft_agc_tuner = NULL;
 
 	if (error) {
 		dprintk("demod=%d: AGC unlock failed: error=%d\n", state->nr, error);
 		return -EIO;
 	}
 
-	state->fft_agc_locked = false;
 	dprintk("demod=%d: AGC unlocked\n", state->nr);
 	return 0;
 }

@@ -356,6 +356,11 @@ struct stv_tuner_t {
 	int powered_on;
 	struct stv_rf_in_t* active_rf_in;
 	struct stv_reservation_t reservation;
+	/* the RF AGC belongs to the tuner: demods which have frozen it for an FFT
+		 (spectrum scan, FE_AGC_LOCK), and the values to restore after the last one*/
+	int fft_users;
+	s32 fft_agcrf_beta;
+	s32 fft_agcrfref;
 };
 
 /*
@@ -488,6 +493,7 @@ struct stv {
 	/* AGC lock state for unicable blindscan */
 	s32 fft_agc_regs[60];
 	bool fft_agc_locked;
+	struct stv_tuner_t* fft_agc_tuner; /* tuner whose RF AGC FE_AGC_LOCK froze */
 };
 
 void card_lock_(struct stv* state, const char* func, int line);

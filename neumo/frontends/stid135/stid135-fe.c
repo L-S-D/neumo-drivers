@@ -2464,6 +2464,11 @@ static int stid135_sleep(struct neumo_dvb_frontend* fe)
 	enum fe_ioctl_result result;
 	state_dprintk("ENTERING sleep\n");
 	dvb_demux_set_bbframes_state(demux, false /*output_bbrames*/, 0x10e /*embeddding pid*/, -1 /*stream_id*/);
+	if(state->fft_agc_locked) {
+		//the application exited without FE_AGC_UNLOCK: do not leave the RF AGC frozen
+		state_dprintk("releasing the AGC lock\n");
+		stid135_agc_unlock(fe);
+	}
 	if(!tuner || !rf_in) {
 		state_dprintk("sleep; adapter did not use tuner; active_tuner=%p active_rf_in=%p\n",
 									tuner, rf_in);
