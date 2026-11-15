@@ -3296,10 +3296,19 @@ struct neumo_dvb_frontend* stid135_attach(struct tbsecp3_dev* tbsecp3_dev, struc
 		card = match_card(tbsecp3_dev);
 		if(!card) {
 			card = kzalloc(sizeof(struct stv_card_t), GFP_KERNEL);
+			if (!card) {
+				kfree(base);
+				goto fail;
+			}
 			init_stv_card(card, base, tbsecp3_dev);
 			list_add(&card->stv_card_list, &stv_card_list);
 			stv_card_make_sysfs(card);
 		} else {
+			if (card->num_chips >= sizeof(card->chips)/sizeof(card->chips[0])) {
+				dprintk("BUG: card has already %d chips\n", card->num_chips);
+				kfree(base);
+				goto fail;
+			}
 			card->use_count++;
 			card->chips[card->num_chips] = base;
 			card->num_chips++;
@@ -3311,6 +3320,15 @@ struct neumo_dvb_frontend* stid135_attach(struct tbsecp3_dev* tbsecp3_dev, struc
 		state->chip = base;
 		if (stid135_probe(state) < 0) {
 			dprintk("No demod found at adr %02X on %s\n", cfg->adr, dev_name(&i2c->dev));
+			//undo the probe and the registration of the chip with its card
+			FE_STiD135_Term(&base->ip);
+			card->chips[--card->num_chips] = NULL;
+			if (--card->use_count == 0) {
+				kobject_del(card->sysfs_kobject);
+				kobject_put(card->sysfs_kobject);
+				list_del(&card->stv_card_list);
+				kfree(card);
+			}
 			kfree(base);
 			goto fail;
 		}
