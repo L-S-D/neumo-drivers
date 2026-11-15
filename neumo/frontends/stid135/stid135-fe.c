@@ -3039,6 +3039,7 @@ static int stid135_constellation_start_(struct neumo_dvb_frontend* fe, struct dt
 		cs->samples_len = num_samples;
 		cs->samples = kzalloc(cs->samples_len * (sizeof(cs->samples[0])), GFP_KERNEL);
 		if (!cs->samples) {
+			cs->samples_len = 0; //or the next call would skip the allocation and use NULL
 			return  -ENOMEM;
 		}
 	}
