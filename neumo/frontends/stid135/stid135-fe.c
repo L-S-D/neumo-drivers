@@ -89,6 +89,11 @@ static int vcm_debug = 0;
 module_param(vcm_debug, int, 0644);
 MODULE_PARM_DESC(vcm_debug, "Dump VCM registers for demod N (1-8), 0=off");
 
+static bool strict_delsys = false;
+module_param(strict_delsys, bool, 0644);
+MODULE_PARM_DESC(strict_delsys, "Warm and cold tunes search only the delivery system set by DTV_DELIVERY_SYSTEM "
+								 "instead of DVB-S and DVB-S2 (default:0 - disabled)");
+
 #define vprintk(fmt, arg...)																					\
 	if(stid135_verbose) printk(KERN_DEBUG pr_fmt("%s:%d " fmt),  __func__, __LINE__, ##arg)
 
@@ -1194,7 +1199,7 @@ static int stid135_set_parameters(struct neumo_dvb_frontend* fe)
 	struct neumo_dtv_frontend_properties *p = &fe->dtv_property_cache;
 	fe_lla_error_t err = FE_LLA_NO_ERROR;
 	fe_lla_error_t error1 = FE_LLA_NO_ERROR;
-	struct fe_sat_search_params search_params;
+	struct fe_sat_search_params search_params = {};
 	s32 rf_power;
 	//BOOL lock_stat=0;
 	struct fe_sat_signal_info* signal_info = &state->signal_info;
@@ -1220,6 +1225,14 @@ static int stid135_set_parameters(struct neumo_dvb_frontend* fe)
 		p->symbol_rate = p->symbol_rate ==0 ? 22000000 : p->symbol_rate;
 	}
 
+	/*
+		search_params.standard used to be set only for blind searches. With the stack
+		initialised to zero (INIT_STACK_ALL_ZERO, as on the kernels this runs on) it was
+		FE_SAT_AUTO_SEARCH for every tune: the demod searched DVB-S and DVB-S2, whatever
+		DTV_DELIVERY_SYSTEM said. Keep this by default; strict_delsys=1 restricts warm
+		and cold tunes to the delivery system.
+	*/
+	search_params.standard = FE_SAT_AUTO_SEARCH;
 #if 1 // official driver always uses FE_SAT_COLD_START
 	/* Search parameters */
 	switch(p->algorithm) {
@@ -1290,7 +1303,7 @@ static int stid135_set_parameters(struct neumo_dvb_frontend* fe)
 					search_params.search_range_hz, p->search_range );
 
 	search_params.puncture_rate	= FE_SAT_PR_UNKNOWN;
-	if(	search_params.standard != FE_SAT_AUTO_SEARCH)
+	if(strict_delsys && search_params.search_algo != FE_SAT_BLIND_SEARCH)
 		switch (p->delivery_system)
 			{
 			case SYS_DSS:
