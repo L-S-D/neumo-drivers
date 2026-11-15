@@ -267,8 +267,8 @@ struct tbsecp3_dev {
 	int cimode; //for 6910X
 };
 
-#define tbs_read(_b, _o)	readl(dev->lmmio + (_b + _o))
-#define tbs_write(_b, _o, _v)	writel((_v), dev->lmmio + (_b + _o))
+#define tbs_read(_b, _o)	readl(dev->lmmio + ((_b) + (_o)))
+#define tbs_write(_b, _o, _v)	writel((_v), dev->lmmio + ((_b) + (_o)))
 
 
 /* tbsecp3-core.c */

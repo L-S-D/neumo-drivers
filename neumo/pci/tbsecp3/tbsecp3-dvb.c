@@ -1086,6 +1086,10 @@ static u32  Set_TSparam(struct i2c_adapter *i2c,int tuner,int time,bool flag)
 	if(!flag)
 		return Bit_rate;
 
+	/* no usable rate yet; the division below needs more than 50 */
+	if (Bit_rate <= 50)
+		return 0;
+
 	Frm_cnt = Many_cnt/(Bit_rate-50) -100;
 
 	tmp[0] =  (Frm_cnt>>24)&0xff;
