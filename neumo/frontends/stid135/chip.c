@@ -332,6 +332,7 @@ STCHIP_Error_t	ChipClose(STCHIP_Info_t* hChip)
 		DeleteNode(node);
 		free(hChip->pRegMapImage);
 		free(hChip->pFieldMapImage);
+		free(hChip->pInstMap);
 		free(hChip);
 	}
 	else
