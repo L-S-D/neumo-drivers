@@ -499,7 +499,8 @@ static int tbsecp3_set_voltage(struct neumo_dvb_frontend* fe,
 	is_slave =false;
 	switch(dev->info->board_id) {
 	case TBSECP3_BOARD_TBS6508:
-		is_slave = (fe->dvb->num %2); //odd numbered tuners are considered slaves
+		/* odd numbered tuners of the card are considered slaves */
+		is_slave = (priv->adap->nr %2);
 		;
 	default:
 		;
