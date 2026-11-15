@@ -2642,10 +2642,11 @@ fe_lla_error_t FE_STiD135_GetFECLock(struct stv* state,
 	/* P1_LOCKEDVIT Viterbi (DVBS1/DSS) lock status field */
 	lockVitField  = FLD_FC8CODEW_DVBSX_VITERBI_VSTATUSVIT_LOCKEDVIT(Demod);
 
-	error |= ChipGetField(hChip, headerField, &fld_value);
-	demodState = (enum fe_sat_search_state)fld_value;
-
 	while ((timer < TimeOut) && (lock == 0)) {
+		/* read the state in each round: it changes while waiting, e.g. from
+			 SEARCH to DVBS2_FOUND */
+		error |= ChipGetField(hChip, headerField, &fld_value);
+		demodState = (enum fe_sat_search_state)fld_value;
 
 		switch (demodState) {
 		case FE_SAT_SEARCH:
