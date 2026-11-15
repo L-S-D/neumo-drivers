@@ -2022,7 +2022,7 @@ static int stid135_tune(struct neumo_dvb_frontend* fe, bool re_tune,
 	struct stv *state = fe->demodulator_priv;
 	struct neumo_dtv_frontend_properties *p = &fe->dtv_property_cache;
 	int err=0;
-	enum fe_ioctl_result result;
+	int result = 0; //stid135_select_rf_in_legacy_ returns 0 or -1, and only runs without tuner
 	state_chip_lock(state);
 	if(!state->active_tuner || !state->active_tuner->active_rf_in) {
 		card_lock(state);
