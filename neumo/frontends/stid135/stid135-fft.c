@@ -856,6 +856,8 @@ static int get_spectrum_scan_fft(struct neumo_dvb_frontend *fe)
 	ktime_t start_time;
 #endif
 	s32 start_idx, end_idx;
+	u64 spectrum_len;
+	bool fft_started = false;
 	ss->spectrum_present = false;
 
 	if(p->scan_end_frequency < p->scan_start_frequency) {
@@ -868,11 +870,14 @@ static int get_spectrum_scan_fft(struct neumo_dvb_frontend *fe)
 	ss->start_frequency = start_frequency;
 	ss->end_frequency = end_frequency;
 
-	ss->frequency_step = p->scan_resolution==0 ? 50 : p->scan_resolution; //in kHz
+	//larger values are reduced below anyway, but would overflow range first
+	ss->frequency_step = p->scan_resolution==0 ? 50 : min_t(u32, p->scan_resolution, max_range); //in kHz
 
 	ss->fft_size =  (p->scan_fft_size>0) ? p->scan_fft_size : 512;
 	if(ss->fft_size >= 4096)
 		ss->fft_size = 4096;
+	if(ss->fft_size < 256)
+		ss->fft_size = 256; //smallest fft: mode 5 below
 	/*compute mode such that fft_size <= 1 << (13-mode)
 		So 1 << (13-mode) is the smallest power of 2 larger than or equal to fft_size
 	*/
@@ -910,7 +915,15 @@ static int get_spectrum_scan_fft(struct neumo_dvb_frontend *fe)
 		ss->range = ss->frequency_step * ss->fft_size; //in kHz
 	}
 
-	ss->spectrum_len = (end_frequency-start_frequency + ss->frequency_step-1)/ss->frequency_step;
+	spectrum_len = div_u64((u64)((s64)p->scan_end_frequency - p->scan_start_frequency) + ss->frequency_step-1,
+												 ss->frequency_step);
+	if(spectrum_len == 0 || spectrum_len > STID135_MAX_SPECTRUM_LEN) {
+		dprintk("demod=%d: bad number of spectrum points: range=[%d,%d]kHz resolution=%dkHz\n",
+						state->nr, start_frequency, end_frequency, ss->frequency_step);
+		error = -EINVAL;
+		goto _end;
+	}
+	ss->spectrum_len = spectrum_len;
 	useable_samples2 = ((ss->fft_size*6)/10+1)/2;
 	lost_samples2 = ss->fft_size/2 - useable_samples2;
 
@@ -919,9 +932,9 @@ static int get_spectrum_scan_fft(struct neumo_dvb_frontend *fe)
 					start_frequency, end_frequency, ss->frequency_step, ss->fft_size,
 					ss->spectrum_len, ss->range, lost_samples2*2, useable_samples2*2);
 
-	ss->freq = kzalloc(ss->spectrum_len * (sizeof(ss->freq[0])), GFP_KERNEL);
+	ss->freq = kvcalloc(ss->spectrum_len, sizeof(ss->freq[0]), GFP_KERNEL);
 
-	ss->spectrum = kzalloc(ss->spectrum_len * (sizeof(ss->spectrum[0])), GFP_KERNEL);
+	ss->spectrum = kvcalloc(ss->spectrum_len, sizeof(ss->spectrum[0]), GFP_KERNEL);
 	temp_freq = kzalloc(8192 * (sizeof(temp_freq[0])), GFP_KERNEL);
 	temp_rf_level = kzalloc(8192 * (sizeof(temp_rf_level[0])), GFP_KERNEL);
 	if (!temp_rf_level || !temp_freq || !ss->freq || !ss->spectrum) {
@@ -938,6 +951,7 @@ static int get_spectrum_scan_fft(struct neumo_dvb_frontend *fe)
 	state_chip_lock(state);
 
 	error = fe_stid135_init_fft(state, mode, Reg);
+	fft_started = true; //Reg now holds the registers to restore
 
 #ifdef DEBUG_TIME
 	{
@@ -951,12 +965,12 @@ static int get_spectrum_scan_fft(struct neumo_dvb_frontend *fe)
 
 	error |= estimate_band_power_demod_for_fft(state, rf_in+1, &pbandx1000);
 
+	state_chip_unlock(state);
+
 	if(error) {
 		dprintk("demod=%d: fe_stid135_init_fft FAILED: error=%d\n", state->nr, error);
-		return error;
+		goto _end;
 	}
-
-	state_chip_unlock(state);
 
 	min_correction[0] = 0x7fffffff;
 	min_correction[1] = 0x7fffffff;
@@ -1059,6 +1073,9 @@ static int get_spectrum_scan_fft(struct neumo_dvb_frontend *fe)
 	dprintk("demod=%d: Freed temp variables\n", state->nr);
 
 	state_chip_lock(state);
+
+	if(!fft_started)
+		return error; //nothing to restore: Reg[] was never filled
 
 	error |= (error1=fe_stid135_term_fft(state, Reg));
 
