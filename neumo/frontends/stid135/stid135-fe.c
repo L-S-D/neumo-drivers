@@ -1035,7 +1035,9 @@ static bool pls_search_list(struct neumo_dvb_frontend* fe)
 	struct stv *state = fe->demodulator_priv;
 	int i = 0;
 	int locked = 0;
-	for(i=0; i<p->pls_search_codes_len;++i) {
+	//the length is set from user space: never go beyond the array
+	int num_codes = min_t(int, p->pls_search_codes_len, ARRAY_SIZE(p->pls_search_codes));
+	for(i=0; i<num_codes;++i) {
 		u32 pls_code = p->pls_search_codes[i];
 		u8 timeout = pls_code & 0xff; //timeout is in the low byte of the unshifted value
 		u32 pls_mode = (pls_code>>26) & 0x3;
