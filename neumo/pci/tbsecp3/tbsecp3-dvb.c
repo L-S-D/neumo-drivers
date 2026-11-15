@@ -3061,10 +3061,11 @@ int tbsecp3_dvb_init(struct tbsecp3_adapter *adapter)
 		return ret;
 
 err7:
-		neumo_dvb_frontend_detach(adapter->fe);
-err6:
+		/* detaching frees the frontend, so release its sec_priv first */
 		tbsecp3_release_sec(adapter->fe);
-
+		neumo_dvb_frontend_detach(adapter->fe);
+		adapter->fe = NULL;
+err6:
 		dvb_net_release(&adapter->dvbnet);
 
 err5:
