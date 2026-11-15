@@ -179,13 +179,21 @@ static ssize_t registers_write(STCHIP_Info_t* hChipHandle, const char __user *bu
 }
 
 
+/*
+	The object found stays valid while the handler runs: the teardown removes the
+	sysfs files (and waits for their handlers) before it frees the object
+*/
 static struct stv_card_t* find_card(struct kobject* kobj)
 {
-	struct stv_card_t *p;
+	struct stv_card_t *p, *ret = NULL;
+	mutex_lock(&stv_list_lock);
 	list_for_each_entry(p, &stv_card_list, stv_card_list)
-		if (p->sysfs_kobject == kobj)
-			return p;
-	return NULL;
+		if (p->sysfs_kobject == kobj) {
+			ret = p;
+			break;
+		}
+	mutex_unlock(&stv_list_lock);
+	return ret;
 }
 
 static ssize_t stv_card_show(struct kobject *kobj, struct kobj_attribute *attr,
@@ -287,11 +295,15 @@ int stv_card_make_sysfs(struct stv_card_t* card)
 
 static struct stv_chip_t* find_chip(struct kobject* kobj)
 {
-	struct stv_chip_t *p;
+	struct stv_chip_t *p, *ret = NULL;
+	mutex_lock(&stv_list_lock);
 	list_for_each_entry(p, &stv_chip_list, stv_chip_list)
-		if (p->sysfs_kobject == kobj)
-			return p;
-	return NULL;
+		if (p->sysfs_kobject == kobj) {
+			ret = p;
+			break;
+		}
+	mutex_unlock(&stv_list_lock);
+	return ret;
 }
 
 static ssize_t stv_chip_show(struct kobject *kobj, struct kobj_attribute *attr,
@@ -456,11 +468,15 @@ int stv_chip_release_sysfs(struct stv_chip_t* chip)
 
 static struct stv* find_demod(struct kobject* kobj)
 {
-	struct stv *p;
+	struct stv *p, *ret = NULL;
+	mutex_lock(&stv_list_lock);
 	list_for_each_entry(p, &stv_demod_list, stv_demod_list)
-		if (p->sysfs_kobject == kobj)
-			return p;
-	return NULL;
+		if (p->sysfs_kobject == kobj) {
+			ret = p;
+			break;
+		}
+	mutex_unlock(&stv_list_lock);
+	return ret;
 }
 
 static ssize_t stv_temperature_show(struct kobject *kobj, struct kobj_attribute *attr,

@@ -41,6 +41,7 @@
 LIST_HEAD(stv_demod_list);
 LIST_HEAD(stv_chip_list);
 LIST_HEAD(stv_card_list);
+DEFINE_MUTEX(stv_list_lock); //protects the three lists, which the sysfs handlers search
 
 static int mode = 1;
 module_param(mode, int, 0444);
@@ -1013,14 +1014,18 @@ static void stid135_release(struct neumo_dvb_frontend* fe)
 	*/
 	kobject_del(state->sysfs_kobject);
 	kobject_put(state->sysfs_kobject);
+	mutex_lock(&stv_list_lock);
 	list_del(&state->stv_demod_list);
+	mutex_unlock(&stv_list_lock);
 	chip->use_count--;
 	if (chip->use_count == 0) {
 		struct stv_card_t* card = chip->card;
 		bool free_card;
 		int i;
 		stv_chip_release_sysfs(chip); //before its handles are closed
+		mutex_lock(&stv_list_lock);
 		list_del(&chip->stv_chip_list);
+		mutex_unlock(&stv_list_lock);
 		state_chip_lock(state);
 		card_lock(state);
 		FE_STiD135_Term (&chip->ip);
@@ -1037,7 +1042,9 @@ static void stid135_release(struct neumo_dvb_frontend* fe)
 		if(free_card) {
 			kobject_del(card->sysfs_kobject);
 			kobject_put(card->sysfs_kobject);
+			mutex_lock(&stv_list_lock);
 			list_del(&card->stv_card_list);
+			mutex_unlock(&stv_list_lock);
 			kfree(card);
 		}
 		kfree(chip);
@@ -3163,28 +3170,38 @@ static struct neumo_dvb_frontend_ops stid135_ops = {
 
 static struct stv_chip_t* match_base(struct i2c_adapter* i2c, u8 adr)
 {
-	struct stv_chip_t *p;
+	struct stv_chip_t *p, *ret = NULL;
+	mutex_lock(&stv_list_lock);
 	list_for_each_entry(p, &stv_chip_list, stv_chip_list)
-		if (p->i2c == i2c && p->adr == adr)
-			return p;
-	return NULL;
+		if (p->i2c == i2c && p->adr == adr) {
+			ret = p;
+			break;
+		}
+	mutex_unlock(&stv_list_lock);
+	return ret;
 }
 
 static struct stv_card_t* match_card(struct tbsecp3_dev* dev)
 {
-	struct stv_card_t *p;
+	struct stv_card_t *p, *ret = NULL;
+	mutex_lock(&stv_list_lock);
 	list_for_each_entry(p, &stv_card_list, stv_card_list)
-		if (p->dev == dev)
-			return p;
-	return NULL;
+		if (p->dev == dev) {
+			ret = p;
+			break;
+		}
+	mutex_unlock(&stv_list_lock);
+	return ret;
 }
 
 static inline int num_chips(void)
 {
 	struct stv_chip_t *p;
 	int ret=0;
+	mutex_lock(&stv_list_lock);
 	list_for_each_entry(p, &stv_chip_list, stv_chip_list)
 		ret++;
+	mutex_unlock(&stv_list_lock);
 	return ret;
 }
 
@@ -3192,8 +3209,10 @@ static inline int num_cards(void)
 {
 	struct stv_card_t* p;
 	int ret=0;
+	mutex_lock(&stv_list_lock);
 	list_for_each_entry(p, &stv_card_list, stv_card_list)
 		ret++;
+	mutex_unlock(&stv_list_lock);
 	return ret;
 }
 
@@ -3301,7 +3320,9 @@ struct neumo_dvb_frontend* stid135_attach(struct tbsecp3_dev* tbsecp3_dev, struc
 				goto fail;
 			}
 			init_stv_card(card, base, tbsecp3_dev);
+			mutex_lock(&stv_list_lock);
 			list_add(&card->stv_card_list, &stv_card_list);
+			mutex_unlock(&stv_list_lock);
 			stv_card_make_sysfs(card);
 		} else {
 			if (card->num_chips >= sizeof(card->chips)/sizeof(card->chips[0])) {
@@ -3326,14 +3347,18 @@ struct neumo_dvb_frontend* stid135_attach(struct tbsecp3_dev* tbsecp3_dev, struc
 			if (--card->use_count == 0) {
 				kobject_del(card->sysfs_kobject);
 				kobject_put(card->sysfs_kobject);
+				mutex_lock(&stv_list_lock);
 				list_del(&card->stv_card_list);
+				mutex_unlock(&stv_list_lock);
 				kfree(card);
 			}
 			kfree(base);
 			goto fail;
 		}
 		stv_chip_make_sysfs(base);
+		mutex_lock(&stv_list_lock);
 		list_add(&base->stv_chip_list, &stv_chip_list);
+		mutex_unlock(&stv_list_lock);
 	}
 #if 1 //official driver has none of this (it is done elsewhere)
 	//pParams = &state->chip->ip;
@@ -3378,7 +3403,9 @@ struct neumo_dvb_frontend* stid135_attach(struct tbsecp3_dev* tbsecp3_dev, struc
 	dev_info(&i2c->dev, "%s demod found at adr %02X on %s\n",
 					 state->fe.ops.info.name, cfg->adr, dev_name(&i2c->dev));
 	stv_demod_make_sysfs(state);
+	mutex_lock(&stv_list_lock);
 	list_add(&state->stv_demod_list, &stv_demod_list);
+	mutex_unlock(&stv_list_lock);
 	return &state->fe;
 
 fail:

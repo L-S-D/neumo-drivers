@@ -897,6 +897,7 @@ int stv_chip_release_sysfs(struct stv_chip_t* chip);
 extern struct list_head stv_chip_list;
 extern struct list_head stv_card_list;
 extern struct list_head stv_demod_list;
+extern struct mutex stv_list_lock;
 
 char* tone_str(enum fe_sec_tone_mode tone);
 char* voltage_str(enum fe_sec_voltage voltage);
