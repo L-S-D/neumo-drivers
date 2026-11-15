@@ -532,10 +532,10 @@ static fe_lla_error_t fe_stid135_read_psd_mem(struct stv* state, s32* rf_level,
 		return(FE_LLA_BAD_PARAMETER);
 
 	error |= ChipGetField(pParams->handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_EXPMAX_EXP_MAX(path), &fld_value);
+	exp = (u32)fld_value;
 	dprintk("demod=%d: FFT read_psd_mem path=%d mode_32bit=%d fft_size=%d exp=%d\n", state->nr,
 					path, mode_32bit, fft_size, exp);
 
-	exp = (u32)fld_value;
 #ifdef DEBUG_TIME
 	{
 		ktime_t now = ktime_get();
