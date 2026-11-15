@@ -366,7 +366,7 @@ I2C_RESULT I2cReadWrite(void *pI2CHost, I2C_MODE mode, u8 ChipAddress, u8 *Data,
 //called once per chip
 static int stid135_probe(struct stv *state)
 {
-	struct fe_stid135_init_param init_params;
+	struct fe_stid135_init_param init_params = {};
 	fe_lla_error_t err = FE_LLA_NO_ERROR;
 	struct fe_stid135_internal_param *p_params;
 	enum device_cut_id cut_id;
@@ -391,10 +391,9 @@ static int stid135_probe(struct stv *state)
 	init_params.rf_input_type	=	0xF; // Single ended RF input on Oxford valid board rev2
 	init_params.roll_off		=  	FE_SAT_35; // NYQUIST Filter value (used for DVBS1/DSS, DVBS2 is automatic)
 	init_params.tuner_iq_inversion	=	FE_SAT_IQ_NORMAL;
-	err = fe_stid135_init(&init_params, &state->chip->ip);
-
 	init_params.ts_nosync		=	ts_nosync;
 	init_params.mis_fix		= mis;
+	err = fe_stid135_init(&init_params, &state->chip->ip);
 
 	if (err != FE_LLA_NO_ERROR) {
 		dprintk("fe_stid135_init error %d !\n", err);
