@@ -5652,9 +5652,15 @@ fe_lla_error_t fe_stid135_reset_obs_registers(struct stv* state)
 fe_lla_error_t FE_STiD135_Term(struct fe_stid135_internal_param* pParams)
 {
 	int error = FE_LLA_NO_ERROR;
+	int i;
 	ChipClose(pParams->handle_demod);
+	pParams->handle_demod = NULL;
 	ChipClose(pParams->handle_soc);
-
+	pParams->handle_soc = NULL;
+	for(i=0; i < sizeof(pParams->vglna_handles)/sizeof(pParams->vglna_handles[0]); ++i) {
+		stvvglna_term(pParams->vglna_handles[i]); //NULL if there is no vglna
+		pParams->vglna_handles[i] = NULL;
+	}
 
 	return error;
 }
