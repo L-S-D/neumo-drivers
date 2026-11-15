@@ -139,9 +139,10 @@ void tbsecp3_dma_reg_init(struct tbsecp3_dev *dev)
 
 void tbsecp3_dma_free(struct tbsecp3_dev *dev)
 {
-	struct tbsecp3_adapter *adapter = dev->adapter;
+	struct tbsecp3_adapter *adapter;
 	int i;
 	for (i = 0; i < dev->info->adapters; i++) {
+		adapter = &dev->adapter[i];
 		if (adapter->dma.buf[0] == NULL)
 			continue;
 
@@ -149,7 +150,6 @@ void tbsecp3_dma_free(struct tbsecp3_dev *dev)
 			adapter->dma.page_size + 0x100,
 			adapter->dma.buf[0], adapter->dma.dma_addr);
 		adapter->dma.buf[0] = NULL;
-		adapter++;
 	}
 }
 
