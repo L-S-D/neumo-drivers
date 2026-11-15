@@ -2991,7 +2991,11 @@ static int stid135_scan_sat(struct neumo_dvb_frontend* fe, bool init,
 		/*
 			A large search range seems to be ok in all cases
 		*/
-		p->search_range = p->search_range ==0 ? (p->scan_fft_size * p->scan_resolution*1000): p->search_range;
+		if(p->search_range == 0) {
+			//in 64 bit, and fe_stid135_search() accepts at most 70 MHz
+			u64 search_range = (u64)max(p->scan_fft_size, 0) * max(p->scan_resolution, 0) * 1000;
+			p->search_range = min_t(u64, search_range, 70000000);
+		}
 
 		/*Although undocumented, a low symbol rate must be set to detect signals with SR below 1 MS/s
 			and a low value does not seem to be essential for high SR transponders
@@ -3029,7 +3033,8 @@ static int stid135_scan_sat(struct neumo_dvb_frontend* fe, bool init,
 		}
 		found = !(*status & FE_TIMEDOUT) && (*status & FE_HAS_LOCK);
 		if(found) {
-			state->spectrum_scan_state.next_frequency = p->frequency + (p->symbol_rate*135)/200000;
+			//in 64 bit: symbol_rate*135 overflows above 31.8 MBd
+			state->spectrum_scan_state.next_frequency = p->frequency + (s32)div_u64((u64)p->symbol_rate*135, 200000);
 			dprintk("BLINDSCAN: GOOD freq=%dkHz SR=%d kS/s returned status=%d next=%dkHz\n", p->frequency, p->symbol_rate/1000, *status,
 							state->spectrum_scan_state.next_frequency /1000);
 			state->spectrum_scan_state.num_good++;
