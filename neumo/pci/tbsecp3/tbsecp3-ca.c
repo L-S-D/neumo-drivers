@@ -255,6 +255,7 @@ int tbsecp3_ca_init(struct tbsecp3_adapter *adap, int nr)
 	return 0;
 
 error2:
+	adap->tbsca = NULL;
 	kfree(tbsca);
 error1:
 	dev_err(&dev->pci_dev->dev,
@@ -265,14 +266,16 @@ error1:
 
 void tbsecp3_ca_release(struct tbsecp3_adapter *adap)
 {
-	struct tbsecp3_ca *tbsca = adap->tbsca;
+	struct tbsecp3_ca *tbsca;
 	if (!adap)
 		return;
+	tbsca = adap->tbsca;
 	if (!tbsca)
 		return;
 	if (!tbsca->ca.data)
 		return;
 	neumo_dvb_ca_en50221_release(&tbsca->ca);
+	adap->tbsca = NULL;
 	kfree(tbsca);
 }
 
