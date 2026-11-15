@@ -506,10 +506,13 @@ static int spectral_scan_init(spectrum_scan_state_t* ss, struct scan_internal_t*
 	if (!ss->spectrum || ss->spectrum_len ==0) {
 		return -ENOMEM;
 	}
-	si->rs = kzalloc(ss->spectrum_len * (sizeof(si->rs[0])), GFP_KERNEL);
-	si->noise = kzalloc(ss->spectrum_len * (sizeof(si->noise[0])), GFP_KERNEL);
-	si->peak_marks = kzalloc(ss->spectrum_len * (sizeof(si->peak_marks[0])), GFP_KERNEL);
-	si->peaks = (struct spectrum_peak_internal_t*) kzalloc(si->max_num_peaks * (sizeof(si->peaks[0])), GFP_KERNEL);
+	//spectra can have a million points, and peaks needs 224 kB
+	si->rs = kvcalloc(ss->spectrum_len, sizeof(si->rs[0]), GFP_KERNEL);
+	si->noise = kvcalloc(ss->spectrum_len, sizeof(si->noise[0]), GFP_KERNEL);
+	si->peak_marks = kvcalloc(ss->spectrum_len, sizeof(si->peak_marks[0]), GFP_KERNEL);
+	si->peaks = kvcalloc(si->max_num_peaks, sizeof(si->peaks[0]), GFP_KERNEL);
+	if (!si->rs || !si->noise || !si->peak_marks || !si->peaks)
+		return -ENOMEM;
 
 	running_sum(si->rs, ss->spectrum, ss->spectrum_len);
 	noise_est(si->noise, ss->spectrum, ss->spectrum_len);
@@ -518,17 +521,13 @@ static int spectral_scan_init(spectrum_scan_state_t* ss, struct scan_internal_t*
 }
 
 static void spectral_scan_end(struct scan_internal_t* si) {
-	if(si->peak_marks)
-		kfree(si->peak_marks);
+	kvfree(si->peak_marks);
 	si->peak_marks = NULL;
-	if(si->peaks)
-		kfree(si->peaks);
+	kvfree(si->peaks);
 	si->peaks = NULL;
-	if(si->rs)
-		kfree(si->rs);
+	kvfree(si->rs);
 	si->rs = NULL;
-	if(si->noise)
-		kfree(si->noise);
+	kvfree(si->noise);
 	si->noise =NULL;
 }
 
@@ -562,7 +561,9 @@ static int scan_level(spectrum_scan_state_t *ss, struct scan_internal_t *si,
 static int scan_all(spectrum_scan_state_t *ss, struct scan_internal_t *si,
 										 s32* spectrum, u32* freq, int spectrum_len) {
 	int window_idx=0;
-	spectral_scan_init(ss, si);
+	int ret = spectral_scan_init(ss, si);
+	if (ret < 0)
+		return ret;
 	for(window_idx=0; window_idx < (int)(sizeof(windows) / sizeof(windows[0])); ++window_idx) {
 		int w = windows[window_idx];
 		scan_level(ss, si, spectrum, freq, spectrum_len, w);
@@ -583,17 +584,28 @@ int neumo_scan_spectrum(spectrum_scan_state_t* ss)
 {
 	struct scan_internal_t si;
 	int j = 0;
+	int ret;
 	ss->threshold = 3000;
 	ss->threshold2 = 3000;
 	ss->mincount = 1;
 	memset(&si, 0, sizeof(si));
-	scan_all(ss, &si, ss->spectrum, ss->freq, ss->spectrum_len);
+	ret = scan_all(ss, &si, ss->spectrum, ss->freq, ss->spectrum_len);
+	if (ret < 0) {
+		dprintk("scan_all failed: %d\n", ret);
+		spectral_scan_end(&si);
+		return ret;
+	}
 	dprintk("scan_all done\n");
 
 	if(ss->candidates)
 		kfree(ss->candidates);
 	ss->num_candidates = si.num_peaks;
-	ss->candidates = kzalloc(ss->num_candidates * (sizeof(ss->candidates[0])), GFP_KERNEL);
+	ss->candidates = kcalloc(ss->num_candidates, sizeof(ss->candidates[0]), GFP_KERNEL);
+	if (!ss->candidates) {
+		ss->num_candidates = 0;
+		spectral_scan_end(&si);
+		return -ENOMEM;
+	}
 	dprintk("allocation done num_candidates=%d\n", ss->num_candidates);
 	for (j = 0; j < si.num_peaks; ++j) {
 		struct spectral_peak_t* p = & ss->candidates[j];
