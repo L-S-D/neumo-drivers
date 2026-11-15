@@ -63,6 +63,15 @@ static void tbsecp3_dma_tasklet(unsigned long adap)
 			next_buffer = (tbs_read(adapter->dma.base, TBSECP3_DMA_STAT) - TBSECP3_DMA_PRE_BUFFERS + 1) & (TBSECP3_DMA_BUFFERS - 1);
 		read_buffer = (u32)adapter->dma.next_buffer;
 
+		/*
+		 * With 15 buffers to read, the card is (about to start) writing into
+		 * the oldest one: the tasklet ran too late and data gets lost. A delay
+		 * of a whole round of the ring cannot be seen at all.
+		 */
+		if (((next_buffer - read_buffer) & (TBSECP3_DMA_BUFFERS - 1)) == TBSECP3_DMA_BUFFERS - 1)
+			dev_warn_ratelimited(&dev->pci_dev->dev,
+				"adapter %d: dma ring overrun, ts data may be lost\n", adapter->nr);
+
 		while (read_buffer != next_buffer)
 		{
 			data = adapter->dma.buf[read_buffer];
