@@ -823,11 +823,18 @@ static enum fe_ioctl_result stid135_select_rf_in_(struct stv* state, struct fe_r
 	int old_config_id = old_tuner ? old_tuner->reservation.config_id : -1;
 	int new_tuner_no = new_rf_in_no;
 	int old_tuner_no = old_tuner ? old_tuner->tuner_no : -1;
-	struct stv_tuner_t* new_tuner = ic ? &state->chip->tuners[new_tuner_no] : NULL;
-	struct stv_rf_in_t* new_rf_in = (ic && new_rf_in_no >=0 && new_rf_in_no < 4) ? &card->rf_ins[new_rf_in_no] : NULL;
+	bool valid_rf_in = new_rf_in_no >= 0 && new_rf_in_no < chip->num_tuners &&
+		new_rf_in_no < sizeof(card->rf_ins)/sizeof(card->rf_ins[0]);
+	struct stv_tuner_t* new_tuner = (ic && valid_rf_in) ? &state->chip->tuners[new_tuner_no] : NULL;
+	struct stv_rf_in_t* new_rf_in = (ic && valid_rf_in) ? &card->rf_ins[new_rf_in_no] : NULL;
 	//for debugging
 	int new_tuner_use_count_before = new_tuner ? new_tuner->reservation.use_count : 0;
 	int new_rf_in_use_count_before = new_rf_in ? new_rf_in->reservation.use_count : 0;
+	if(ic && !valid_rf_in) {
+		//before anything changes: no tuner below means "release the old one"
+		state_dprintk("BUG: invalid rf_in=%d\n", new_rf_in_no);
+		return FE_RESERVATION_FAILED;
+	}
 	if(new_rf_in_no == old_rf_in_no && new_tuner_no == old_tuner_no && ic && old_config_id == ic->config_id) {
 		state_dprintk("BUG: rf_in=%d AND tuner_no=%d unchanged\n", new_rf_in_no, new_tuner_no);
 		return FE_RESERVATION_UNCHANGED;
@@ -978,11 +985,13 @@ static int stid135_select_rf_in_legacy_(struct stv* state)
 		state_dprintk("rf_in_no=%d active_tuner=%p active_rf_in=%p\n", rf_in_no, state->active_tuner,
 									state->active_tuner ? state->active_tuner->active_rf_in : NULL);
 
-		struct fe_rf_input_control ic;
-		ic.owner = (pid_t)0xffffffff;
-		ic.config_id = 1;
-		ic.rf_in = rf_in_no;
-		ic.unicable_mode = false;
+		struct fe_rf_input_control ic = {
+			.owner = (pid_t)0xffffffff,
+			.config_id = 1,
+			.unicable_mode = false,
+			.rf_in = rf_in_no,
+			.mode = FE_RESERVATION_MODE_MASTER_OR_SLAVE, //what the stack initialised to zero gave
+		};
 		if(!state_chip_is_locked_by_state(state)) {
 			state_dprintk("Attempting select_rf_in_ without chip lock");
 			dump_stack();
