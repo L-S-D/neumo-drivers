@@ -385,7 +385,8 @@ static fe_lla_error_t fe_stid135_init_fft(struct stv*state, int fft_mode, s32 Re
 	error |= ChipSetFieldImage(pParams->handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_CFR21_CAR2_FREQ(path), 0x00);
 	error |= ChipSetFieldImage(pParams->handle_demod, FLD_FC8CODEW_DVBSX_DEMOD_CFR20_CAR2_FREQ(path), 0x00);
 	error |= ChipSetRegisters(pParams->handle_demod, (u16)REG_RC8CODEW_DVBSX_DEMOD_CFR22(path), 3);
- 	WAIT_N_MS(200);		  /* Registers modification period */
+	/* Registers modification period; the other demods may use the chip meanwhile */
+	state_chip_sleep(state, 200);
 	return error;
 }
 
