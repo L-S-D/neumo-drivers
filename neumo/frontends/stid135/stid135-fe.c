@@ -3053,6 +3053,9 @@ static int stid135_constellation_start_(struct neumo_dvb_frontend* fe, struct dt
 																													FLD_FC8CODEW_DVBSX_DEMOD_ISYMB_I_SYMBOL(state->nr+1));
 		cs->samples[cs->num_samples].real = ChipGetFieldImage(pParams->handle_demod,
 																													FLD_FC8CODEW_DVBSX_DEMOD_QSYMB_Q_SYMBOL(state->nr+1));
+		//up to 1024 samples are read at each round of the frontend thread: let other demods in
+		if (cs->num_samples % 64 == 63)
+			state_chip_sleep(state, 1);
 	}
 	vprintk("demod: %d: constellation retrieved samples=%d\n", state->nr, cs->num_samples);
 
