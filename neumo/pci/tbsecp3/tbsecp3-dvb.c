@@ -64,10 +64,26 @@ struct sec_priv {
 	int (*set_voltage)(struct neumo_dvb_frontend *fe,
 				 enum fe_sec_voltage voltage);
 };
+/*
+	The register callbacks below are only used by the FE_ECP3FW_* and FE_24CXX_*
+	ioctls of the frontends, with offsets from user space: only aligned 32 bit
+	registers within BAR 0 are accessed, anything else reads as 0 and is not written.
+ */
+static bool ecp3_reg_ok(struct tbsecp3_dev *dev, u32 base, u8 reg)
+{
+	u64 offset = (u64)base + reg;
+
+	return !(offset & 3) && offset + 4 <= pci_resource_len(dev->pci_dev, 0);
+}
+
 static void ecp3_spi_read(struct i2c_adapter *i2c,u8 reg, u32 *buf)
 {
 	struct tbsecp3_i2c *i2c_adap = i2c_get_adapdata(i2c);
 	struct tbsecp3_dev *dev = i2c_adap->dev;
+	if (!ecp3_reg_ok(dev, TBSECP3_GPIO_BASE, reg)) {
+		*buf = 0;
+		return;
+	}
 	*buf = tbs_read(TBSECP3_GPIO_BASE,reg );
 
 	//printk(" tbsecp3-dvb : ecp3_spi_read **********%x = %x*******\n",reg,*buf);
@@ -79,6 +95,8 @@ static void ecp3_spi_write(struct i2c_adapter *i2c,u8 reg, u32 buf)
 	struct tbsecp3_i2c *i2c_adap = i2c_get_adapdata(i2c);
 	struct tbsecp3_dev *dev = i2c_adap->dev;
 	//printk(" tbsecp3-dvb : ecp3_spi_write **********%x = %x*******\n",reg,buf);
+	if (!ecp3_reg_ok(dev, TBSECP3_GPIO_BASE, reg))
+		return;
 	tbs_write(TBSECP3_GPIO_BASE, reg, buf);
 
 	return ;
@@ -88,6 +106,10 @@ static void mcu_24cxx_read(struct i2c_adapter *i2c,u32 bassaddr, u8 reg, u32 *bu
 {
 	struct tbsecp3_i2c *i2c_adap = i2c_get_adapdata(i2c);
 	struct tbsecp3_dev *dev = i2c_adap->dev;
+	if (!ecp3_reg_ok(dev, bassaddr, reg)) {
+		*buf = 0;
+		return;
+	}
 	*buf = tbs_read(bassaddr,reg );
 
 	//printk(" tbsecp3-dvb : mcu_24cxx_read *****bassaddr: %x,  %x = %x*******\n",bassaddr,reg,*buf);
@@ -99,6 +121,8 @@ static void mcu_24cxx_write(struct i2c_adapter *i2c,u32 bassaddr,u8 reg, u32 buf
 	struct tbsecp3_i2c *i2c_adap = i2c_get_adapdata(i2c);
 	struct tbsecp3_dev *dev = i2c_adap->dev;
 	//printk(" tbsecp3-dvb : mcu_24cxx_write ****bassaddr: %x,***%x = %x*******\n",bassaddr,reg,buf);
+	if (!ecp3_reg_ok(dev, bassaddr, reg))
+		return;
 	tbs_write(bassaddr, reg, buf);
 
 	return ;
