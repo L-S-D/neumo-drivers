@@ -240,24 +240,28 @@ static ssize_t ts_read(struct file *file, char __user *ptr,
 	struct dvb_device *dvbdev = file->private_data;
 	struct tbsecp3_ci *chan = dvbdev->priv;
 	int count;
-	unsigned int copied = -EAGAIN;
+	unsigned int copied = 0;
+
+	/* only whole packets are read */
+	if (size < TS_PACKET_SIZE)
+		return -EINVAL;
 
 	//printk("%s channel index:%d \n",__func__,  chan->nr);
 	count = kfifo_len(&chan->r_fifo);
 	while (count < TS_PACKET_SIZE)
 	{
 		if (file->f_flags & O_NONBLOCK)
-			break;
+			return -EAGAIN;
 		chan->read_ready = 0;
 		if (wait_event_interruptible(chan->read_wq,
 					     chan->read_ready == 1) < 0)
-			break;
+			return -ERESTARTSYS;
 		count = kfifo_len(&chan->r_fifo);
 	}
 
 	if (count > size)
 		count = size;
-	if (count >= TS_PACKET_SIZE && kfifo_to_user(&chan->r_fifo, ptr, count, &copied))
+	if (kfifo_to_user(&chan->r_fifo, ptr, count, &copied))
 		return -EFAULT;
 
 	return copied;
@@ -285,7 +289,10 @@ static int ts_open(struct inode *inode, struct file *filp)
 	struct tbsecp3_ci *chan = dvbdev->priv;
 	int ret;
 	ret =  dvb_generic_open(inode,filp);
+	if (ret < 0)
+		return ret;
 	//printk("%s channel index:%d \n",__func__,  chan->nr);
+	mutex_lock(&chan->open_lock);
 	kfifo_reset(&chan->w_fifo);
 	kfifo_reset(&chan->r_fifo);
 
@@ -294,8 +301,9 @@ static int ts_open(struct inode *inode, struct file *filp)
 		//start_indma_transfer(chan);
 	}
 	if ((filp->f_flags & O_ACCMODE) == O_RDONLY)
-		chan->is_open_for_read = 1;
+		chan->is_open_for_read++;
 	chan->is_open++;
+	mutex_unlock(&chan->open_lock);
 
 	return ret;
 }
@@ -306,13 +314,15 @@ static int ts_release(struct inode *inode, struct file *file)
 	struct tbsecp3_ci *chan = dvbdev->priv;
 
 	//printk("%s channel index:%d \n",__func__,  chan->nr);
+	mutex_lock(&chan->open_lock);
 	chan->is_open--;
 	if(chan->is_open<=0){
 		//stop_indma_transfer(chan);
 		stop_outdma_transfer(chan);
 	}
 	if ((file->f_flags & O_ACCMODE) == O_RDONLY)
-		chan->is_open_for_read = 0;
+		chan->is_open_for_read--;
+	mutex_unlock(&chan->open_lock);
 
 	return dvb_generic_release(inode,file);
 }
@@ -382,6 +392,11 @@ static long tbsci_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 					printk("%s ca%d:INPUT_BITRATE:%d\n",
 					       __func__, chan->nr,
 					       prop.u.data);
+					/* write_dma_work() divides by w_bitrate * 3 MiB (in 32 bits) */
+					if (prop.u.data == 0 || prop.u.data > 1000) {
+						ret = -EINVAL;
+						break;
+					}
 					chan->w_bitrate = prop.u.data;
 					//set clock preset
 
@@ -685,6 +700,11 @@ int tbsecp3_ci_init(struct tbsecp3_adapter *adap,int nr,int cimode)
 	tbsci->next_buffer = 0;
 	tbsci->cnt = 0;
 	tbsci->nr = nr;
+	mutex_init(&tbsci->open_lock);
+	if (write_block_cell <= 0) {
+		printk("%s: invalid write_block_cell=%d, using 64\n", __func__, write_block_cell);
+		write_block_cell = 64;
+	}
 
 
 

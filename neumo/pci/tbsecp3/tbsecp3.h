@@ -202,9 +202,10 @@ struct tbsecp3_ci{
 	dma_addr_t		r_dmaphy;
 	struct kfifo 		w_fifo;
 	struct kfifo 		r_fifo;
-	u8			is_open;
+	struct mutex		open_lock; /* is_open, is_open_for_read */
+	int			is_open;
 	u32			w_bitrate;
-	int is_open_for_read;
+	int is_open_for_read; /* number of read-only opens */
 	int feeds;
 	struct dvb_device    *ci_dev;
 
