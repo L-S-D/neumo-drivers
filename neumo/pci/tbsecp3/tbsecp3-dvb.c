@@ -3054,6 +3054,15 @@ int tbsecp3_dvb_init(struct tbsecp3_adapter *adapter)
 				ret = neumo_dvb_register_frontend(adap, adapter->fe2);
 				if (ret < 0) {
 						dev_err(&dev->pci_dev->dev, "frontend2 register failed\n");
+						/*
+						 * Go on with the first frontend only: returning the error would
+						 * leave the registered adapter behind, because adapters whose
+						 * init failed are not detached. fe2 shares the demod state of
+						 * fe and is not registered, so it is not detached either.
+						 */
+						tbsecp3_release_sec(adapter->fe2);
+						adapter->fe2 = NULL;
+						ret = 0;
 				}
 		}
 
