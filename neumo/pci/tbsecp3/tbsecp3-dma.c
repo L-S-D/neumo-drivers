@@ -168,20 +168,39 @@ int tbsecp3_dma_init(struct tbsecp3_dev *dev)
 	int i, j;
 
 	for (i = 0; i < dev->info->adapters; i++) {
+		unsigned int pkts;
+
 		if (dma_pkts[i] < 16)
 			dma_pkts[i] = 16;
 		if (dma_pkts[i] > 256)
 			dma_pkts[i] = 256;
 
-		adapter->dma.buffer_pkts = dma_pkts[i];
-		adapter->dma.buffer_size = dma_pkts[i] * TS_PACKET_SIZE;
-		adapter->dma.page_size = adapter->dma.buffer_size * TBSECP3_DMA_BUFFERS;
+		/*
+		 * The ring is one coherent block, of order 7 for 128 packets (below
+		 * 4 GiB without an iommu). When memory is fragmented, e.g. when the
+		 * module is reloaded after a long uptime, use smaller buffers rather
+		 * than failing the whole card.
+		 */
+		for (pkts = dma_pkts[i]; ; pkts = max(pkts / 2, 16U)) {
+			/* the last try may warn */
+			gfp_t gfp = pkts > 16 ? GFP_KERNEL | __GFP_NOWARN : GFP_KERNEL;
 
-		adapter->dma.buf[0] = dma_alloc_coherent(&dev->pci_dev->dev,
-				adapter->dma.page_size + 0x100,
-				&adapter->dma.dma_addr, GFP_KERNEL);
+			adapter->dma.buffer_pkts = pkts;
+			adapter->dma.buffer_size = pkts * TS_PACKET_SIZE;
+			adapter->dma.page_size = adapter->dma.buffer_size * TBSECP3_DMA_BUFFERS;
+
+			adapter->dma.buf[0] = dma_alloc_coherent(&dev->pci_dev->dev,
+					adapter->dma.page_size + 0x100,
+					&adapter->dma.dma_addr, gfp);
+			if (adapter->dma.buf[0] || pkts <= 16)
+				break;
+		}
 		if (!adapter->dma.buf[0])
 			goto err;
+		if (pkts != dma_pkts[i])
+			dev_warn(&dev->pci_dev->dev,
+				"TS in %d: no memory for a dma buffer of %u TS packets, using %u\n",
+				adapter->cfg->ts_in, dma_pkts[i], pkts);
 
 		dev_dbg(&dev->pci_dev->dev,
 			"TS in %d: DMA page %d bytes, %d bytes (%d TS packets) per %d buffers\n", adapter->cfg->ts_in,
