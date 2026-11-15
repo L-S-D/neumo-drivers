@@ -444,8 +444,13 @@ int stv_chip_make_sysfs(struct stv_chip_t* chip)
 
 int stv_chip_release_sysfs(struct stv_chip_t* chip)
 {
-	kobject_put(chip->sysfs_kobject);
+	//children first; kobject_del() waits for running handlers
+	kobject_del(chip->sysfs_registers_kobject);
 	kobject_put(chip->sysfs_registers_kobject);
+	chip->sysfs_registers_kobject = NULL;
+	kobject_del(chip->sysfs_kobject);
+	kobject_put(chip->sysfs_kobject);
+	chip->sysfs_kobject = NULL;
 	return 0;
 }
 

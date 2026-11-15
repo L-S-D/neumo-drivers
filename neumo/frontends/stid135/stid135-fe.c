@@ -1004,27 +1004,44 @@ static int stid135_init(struct neumo_dvb_frontend* fe)
 static void stid135_release(struct neumo_dvb_frontend* fe)
 {
 	struct stv *state = fe->demodulator_priv;
-	dev_dbg(&state->chip->i2c->dev, "%s: demod %d\n", __func__, state->nr);
+	struct stv_chip_t* chip = state->chip;
+	dev_dbg(&chip->i2c->dev, "%s: demod %d\n", __func__, state->nr);
 	state_dprintk("release");
-	state->chip->use_count--;
-	if (state->chip->use_count == 0) {
-		state_chip_lock(state);
-		card_lock(state);
-		FE_STiD135_Term (&state->chip->ip);
-		state->chip->card->use_count--;
-		if(state->chip->card->use_count ==0) {
-			kobject_put(state->chip->card->sysfs_kobject);
-			list_del(&state->chip->card->stv_card_list);
-			kfree(state->chip->card);
-		}
-		card_unlock(state);
-		state_chip_unlock(state);
-		stv_chip_release_sysfs(state->chip);
-		list_del(&state->chip->stv_chip_list);
-		kfree(state->chip);
-	}
+	/*
+		Remove the sysfs files before what they show: kobject_del() waits for the
+		handlers that run, and later ones do not find the object anymore
+	*/
+	kobject_del(state->sysfs_kobject);
 	kobject_put(state->sysfs_kobject);
 	list_del(&state->stv_demod_list);
+	chip->use_count--;
+	if (chip->use_count == 0) {
+		struct stv_card_t* card = chip->card;
+		bool free_card;
+		int i;
+		stv_chip_release_sysfs(chip); //before its handles are closed
+		list_del(&chip->stv_chip_list);
+		state_chip_lock(state);
+		card_lock(state);
+		FE_STiD135_Term (&chip->ip);
+		for(i=0; i < sizeof(card->rf_ins)/sizeof(card->rf_ins[0]); ++i) {
+			if(card->rf_ins[i].controlling_chip == chip)
+				card->rf_ins[i].controlling_chip = NULL;
+		}
+		card->chips[chip->chip_no] = NULL;
+		card->use_count--;
+		free_card = card->use_count == 0;
+		//the locks are part of card and chip: release them before freeing these
+		card_unlock(state);
+		state_chip_unlock(state);
+		if(free_card) {
+			kobject_del(card->sysfs_kobject);
+			kobject_put(card->sysfs_kobject);
+			list_del(&card->stv_card_list);
+			kfree(card);
+		}
+		kfree(chip);
+	}
 	kfree(state);
 }
 
