@@ -2820,6 +2820,8 @@ static int dvb_frontend_do_ioctl(struct file *file, unsigned int cmd, void *parg
 	struct dvb_device *dvbdev = file->private_data;
 	struct neumo_dvb_frontend* fe = dvbdev->priv;
 	struct neumo_dvb_frontend_private* fepriv = fe->frontend_priv;
+	bool stop_search;
+	int sem_err;
 	//dprintk("fepriv=%p\n", fepriv);
 #if 0
 	fe_dprintk(fe, "%s: (%d)\n", __func__, _IOC_NR(cmd));
@@ -2868,7 +2870,19 @@ static int dvb_frontend_do_ioctl(struct file *file, unsigned int cmd, void *parg
 			return err;
 	}
 
-	if (down_interruptible(&fepriv->sem))
+	/*
+	 * Setting properties (DTV_CLEAR, a tune) waits for the semaphore, which
+	 * the frontend thread holds during a whole search: seconds on a narrow
+	 * carrier. The new parameters replace that search anyway, so ask it to
+	 * stop, as DTV_STOP does.
+	 */
+	stop_search = cmd == FE_SET_PROPERTY && (file->f_flags & O_ACCMODE) != O_RDONLY;
+	if (stop_search)
+		atomic_set(&fepriv->algo_state.task_should_stop, true);
+	sem_err = down_interruptible(&fepriv->sem);
+	if (stop_search)
+		atomic_set(&fepriv->algo_state.task_should_stop, false);
+	if (sem_err)
 		return -ERESTARTSYS;
 
 	if (fe->exit != DVB_FE_NO_EXIT) {
