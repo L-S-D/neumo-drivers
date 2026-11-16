@@ -2774,6 +2774,46 @@ static int dvb_frontend_read_status(struct neumo_dvb_frontend* fe, enum fe_statu
 	return 0;
 }
 
+/*
+ * FE_GET_PROPERTY asking for statistics (DTV_STAT_*) only, on a frontend
+ * without get_frontend(): the values are those the frontend thread stored
+ * in the property cache (stid135: read_status()), the hardware is not read.
+ * The caller then needs no semaphore either, for the same reason as with
+ * FE_READ_STATUS. A value read while the thread updates it may mix two of
+ * its iterations.
+ * Returns -EAGAIN for any other request: it goes the usual way.
+ */
+static int dvb_frontend_get_stats(struct neumo_dvb_frontend* fe, struct file *file,
+																	struct dtv_properties *tvps)
+{
+	struct dtv_property *tvp;
+	int i, err = 0;
+
+	if (fe->ops.get_frontend || !tvps->num || tvps->num > DTV_IOCTL_MAX_MSGS)
+		return -EAGAIN;
+
+	tvp = memdup_array_user((void __user *)tvps->props, tvps->num, sizeof(*tvp));
+	if (IS_ERR(tvp))
+		return PTR_ERR(tvp);
+
+	for (i = 0; i < tvps->num; i++) {
+		if (tvp[i].cmd < DTV_STAT_SIGNAL_STRENGTH || tvp[i].cmd > DTV_STAT_TOTAL_BLOCK_COUNT) {
+			err = -EAGAIN;
+			goto out;
+		}
+	}
+	for (i = 0; i < tvps->num; i++) {
+		err = neumouapi_dtv_property_process_get(fe, &fe->dtv_property_cache, tvp + i, file);
+		if (err < 0)
+			goto out;
+	}
+	if (copy_to_user((void __user *)tvps->props, tvp, tvps->num * sizeof(*tvp)))
+		err = -EFAULT;
+out:
+	kfree(tvp);
+	return err;
+}
+
 //main entry point; semaphore not held yet
 static int dvb_frontend_do_ioctl(struct file *file, unsigned int cmd, void *parg)
 {
@@ -2818,6 +2858,14 @@ static int dvb_frontend_do_ioctl(struct file *file, unsigned int cmd, void *parg
 		if (fe->exit != DVB_FE_NO_EXIT)
 			return -ENODEV;
 		return dvb_frontend_read_status(fe, parg);
+	}
+	if (cmd == FE_GET_PROPERTY) {
+		int err;
+		if (fe->exit != DVB_FE_NO_EXIT)
+			return -ENODEV;
+		err = dvb_frontend_get_stats(fe, file, parg);
+		if (err != -EAGAIN)
+			return err;
 	}
 
 	if (down_interruptible(&fepriv->sem))
