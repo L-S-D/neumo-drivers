@@ -2672,6 +2672,13 @@ fe_lla_error_t FE_STiD135_GetFECLock(struct stv* state,
 		state->signal_info.fec_locked =lock;
 		if (lock == 0)
 		{
+			/* the timeout is up to 48 s (blind search below 1 MBd), and a tune
+			 * or a close of the frontend waits for this search: give up when
+			 * asked to */
+			if (kthread_should_stop() || neumo_dvb_frontend_task_should_stop(&state->fe)) {
+				state_dprintk("exiting on should stop\n");
+				break;
+			}
 			state_chip_sleep(state, 10);
 			timer += 10;
 		}
