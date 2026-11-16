@@ -806,6 +806,10 @@ restart:
 				 */
 				if (fepriv->algo_status & DVBFE_ALGO_SEARCH_AGAIN) {
 					if (fe->ops.search) {
+						/* FE_READ_STATUS (answered without the semaphore) reports
+						 * nothing until this search has a result, not the result of
+						 * the search before */
+						WRITE_ONCE(fepriv->searching, true);
 						fepriv->algo_status = fe->ops.search(fe);
 						/* We did do a search as was requested, the flags are
 						 * now unset as well and has the flags wrt to search.
@@ -831,6 +835,7 @@ restart:
 						fepriv->delay = 60 * HZ;
 					}
 				}
+				WRITE_ONCE(fepriv->searching, false);
 				break;
 			default:
 				fe_dprintk(fe, "UNDEFINED ALGO !\n");
@@ -2738,6 +2743,37 @@ static int dvb_frontend_handle_algo_ctrl_ioctl(struct file *file,
 	return err;
 }
 
+/*
+ * FE_READ_STATUS: the status the frontend thread stored after its last
+ * iteration; the hardware is not read here.
+ */
+static int dvb_frontend_read_status(struct neumo_dvb_frontend* fe, enum fe_status *status)
+{
+	struct neumo_dvb_frontend_private* fepriv = fe->frontend_priv;
+	unsigned int state = READ_ONCE(fepriv->state);
+
+	/* if retune was requested but hasn't occurred yet, prevent
+	 * that user get signal state from previous tuning */
+	if (state == FESTATE_RETUNE || state == FESTATE_ERROR) {
+		fe_dprintk(fe, "FE_READ_STATUS retune=%d error=%d\n", state == FESTATE_RETUNE,
+							 state == FESTATE_ERROR);
+		*status = 0;
+		return 0;
+	}
+
+	/* a search runs: the stored status is that of the search before (a
+	 * caller that waited for the semaphore got the result of this one) */
+	if (READ_ONCE(fepriv->searching)) {
+		*status = 0;
+		return 0;
+	}
+
+	if (!fe->ops.read_status)
+		return -ENOTSUPP;
+	*status = READ_ONCE(fepriv->status);
+	return 0;
+}
+
 //main entry point; semaphore not held yet
 static int dvb_frontend_do_ioctl(struct file *file, unsigned int cmd, void *parg)
 {
@@ -2769,6 +2805,19 @@ static int dvb_frontend_do_ioctl(struct file *file, unsigned int cmd, void *parg
 		if(cmd == FE_GET_EVENT) {
 			return dvb_frontend_get_event(fe, parg, file->f_flags);
 		}
+	}
+
+	/*
+	 * FE_READ_STATUS only reads what the frontend thread stored. It does not
+	 * wait for the semaphore, which the thread holds for a whole tuning
+	 * iteration: on a stid135 a search without carrier takes seconds, and a
+	 * caller polling the status (tvheadend's frontend monitor, with its
+	 * global lock held) would stand still for as long.
+	 */
+	if (cmd == FE_READ_STATUS) {
+		if (fe->exit != DVB_FE_NO_EXIT)
+			return -ENODEV;
+		return dvb_frontend_read_status(fe, parg);
 	}
 
 	if (down_interruptible(&fepriv->sem))
@@ -3695,30 +3744,9 @@ static int dvb_frontend_handle_ioctl(struct file *file, unsigned int cmd, void *
 		break;
 	}
 
-	case FE_READ_STATUS: {
-		enum fe_status *status = parg;
-
-		/* if retune was requested but hasn't occurred yet, prevent
-		 * that user get signal state from previous tuning */
-		if (fepriv->state == FESTATE_RETUNE ||
-				fepriv->state == FESTATE_ERROR) {
-			fe_dprintk(fe, "FE_READ_STATUS retune=%d error=%d\n", fepriv->state == FESTATE_RETUNE ,
-							fepriv->state == FESTATE_ERROR);
-			err = 0;
-			*status = 0;
-			break;
-		}
-
-		if (fe->ops.read_status) {
-#if 0
-			err = fe->ops.read_status(fe, status);
-#else
-			err = 0;
-			*status = fepriv->status;
-#endif
-		}
+	case FE_READ_STATUS:
+		err = dvb_frontend_read_status(fe, parg);
 		break;
-	}
 
 	case FE_SET_RF_INPUT: {
 		struct fe_rf_input_control* rf_input = (struct fe_rf_input_control* )parg;

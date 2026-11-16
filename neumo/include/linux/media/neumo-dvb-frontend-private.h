@@ -64,6 +64,7 @@ struct neumo_dvb_frontend_private {
 	unsigned long release_jiffies;
 	unsigned int wakeup;
 	enum fe_status status;
+	bool searching; /* a search runs; status is still that of the one before */
 	unsigned long tune_mode_flags;
 	unsigned int delay;
 	unsigned int reinitialise;
