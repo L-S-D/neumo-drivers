@@ -359,7 +359,7 @@ static int neumo_dvb_frontend_swzigzag_autotune(struct neumo_dvb_frontend *fe, i
 	int ready = 0;
 	int fe_set_err = 0;
 	struct neumo_dvb_frontend_private *fepriv = fe->frontend_priv;
-	struct neumo_dtv_frontend_properties *c = &fe->dtv_property_cache, tmp;
+	struct neumo_dtv_frontend_properties *c = &fe->dtv_property_cache;
 	int original_inversion = c->inversion;
 	u32 original_frequency = c->frequency;
 
@@ -435,10 +435,10 @@ static int neumo_dvb_frontend_swzigzag_autotune(struct neumo_dvb_frontend *fe, i
 	c->frequency += fepriv->lnb_drift;
 	if (autoinversion)
 		c->inversion = fepriv->inversion;
-	tmp = *c;
+	fepriv->cache_save = *c;
 	if (fe->ops.set_frontend)
 		fe_set_err = fe->ops.set_frontend(fe);
-	*c = tmp;
+	*c = fepriv->cache_save;
 	if (fe_set_err < 0) {
 		fepriv->state = FESTATE_ERROR;
 		return fe_set_err;
@@ -456,7 +456,7 @@ static void neumo_dvb_frontend_swzigzag(struct neumo_dvb_frontend *fe)
 	enum fe_status s = FE_NONE;
 	int retval = 0;
 	struct neumo_dvb_frontend_private *fepriv = fe->frontend_priv;
-	struct neumo_dtv_frontend_properties *c = &fe->dtv_property_cache, tmp;
+	struct neumo_dtv_frontend_properties *c = &fe->dtv_property_cache;
 
 	if (fepriv->max_drift)
 		dev_warn_once(fe->dvb->device,
@@ -472,10 +472,10 @@ static void neumo_dvb_frontend_swzigzag(struct neumo_dvb_frontend *fe)
 	/* in SCAN mode, we just set the frontend when asked and leave it alone */
 	if (fepriv->tune_mode_flags & FE_TUNE_MODE_ONESHOT) {
 		if (fepriv->state & FESTATE_RETUNE) {
-			tmp = *c;
+			fepriv->cache_save = *c;
 			if (fe->ops.set_frontend)
 				retval = fe->ops.set_frontend(fe);
-			*c = tmp;
+			*c = fepriv->cache_save;
 			if (retval < 0)
 				fepriv->state = FESTATE_ERROR;
 			else
@@ -2882,7 +2882,9 @@ static int dvb_frontend_handle_compat_ioctl(struct file *file, unsigned int cmd,
 	} else if (cmd == COMPAT_FE_GET_PROPERTY) {
 		struct compat_dtv_properties prop, *tvps = NULL;
 		struct compat_dtv_property *tvp = NULL;
-		struct neumo_dtv_frontend_properties getp = fe->dtv_property_cache;
+		struct neumo_dtv_frontend_properties *getp = &fepriv->getp;
+
+		*getp = fe->dtv_property_cache;
 
 		if (copy_from_user(&prop, compat_ptr(arg), sizeof(prop)))
 			return -EFAULT;
@@ -2908,7 +2910,7 @@ static int dvb_frontend_handle_compat_ioctl(struct file *file, unsigned int cmd,
 		 * before updating the properties cache.
 		 */
 		if (fepriv->state != FESTATE_IDLE && fepriv->state != FESTATE_DISEQC) {
-			err = dtv_get_frontend(fe, &getp, NULL);
+			err = dtv_get_frontend(fe, getp, NULL);
 			if (err < 0) {
 				kfree(tvp);
 				return err;
@@ -2916,7 +2918,7 @@ static int dvb_frontend_handle_compat_ioctl(struct file *file, unsigned int cmd,
 		}
 		for (i = 0; i < tvps->num; i++) {
 			err = dvbuapi_dtv_property_process_get(
-			    fe, &getp, (struct dvb_api_dtv_property *)(tvp + i), file);
+			    fe, getp, (struct dvb_api_dtv_property *)(tvp + i), file);
 			if (err < 0) {
 				kfree(tvp);
 				return err;
@@ -3256,10 +3258,10 @@ static int neumouapi_dvb_get_properties(struct neumo_dvb_frontend* fe, struct fi
 {
 	struct neumo_dvb_frontend_private* fepriv = fe->frontend_priv;
 	struct dtv_property *tvp = NULL;
-	struct neumo_dtv_frontend_properties getp;
+	struct neumo_dtv_frontend_properties *getp = &fepriv->getp;
 	int i, err;
 
-	memcpy(&getp, &fe->dtv_property_cache, sizeof(getp));
+	memcpy(getp, &fe->dtv_property_cache, sizeof(*getp));
 
 	dev_dbg(fe->dvb->device, "%s: properties.num = %d\n",
 		__func__, tvps->num);
@@ -3292,7 +3294,7 @@ static int neumouapi_dvb_get_properties(struct neumo_dvb_frontend* fe, struct fi
 	 */
 	if (fepriv->state != FESTATE_IDLE && fepriv->state != FESTATE_DISEQC) {
 		if(tvps->num > 1 || (tvp[0].cmd != DTV_SPECTRUM || tvp[0].cmd != DTV_CONSTELLATION)) {
-			err = dtv_get_frontend(fe, &getp, NULL);
+			err = dtv_get_frontend(fe, getp, NULL);
 			if(err<0) {
 				fe_dprintk(fe, "FAILED: prop=%d err=%d\n", tvp[i].cmd, err);
 			}
@@ -3301,7 +3303,7 @@ static int neumouapi_dvb_get_properties(struct neumo_dvb_frontend* fe, struct fi
 		}
 	}
 	for (i = 0; i < tvps->num; i++) {
-		err = neumouapi_dtv_property_process_get(fe, &getp,
+		err = neumouapi_dtv_property_process_get(fe, getp,
 								 tvp + i, file);
 		if(err<0) {
 			fe_dprintk(fe, "FAILED: prop=%d err=%d\n", tvp[i].cmd, err);
@@ -3327,10 +3329,10 @@ static int dvbuapi_dvb_get_properties(struct neumo_dvb_frontend* fe, struct file
 {
 	struct neumo_dvb_frontend_private* fepriv = fe->frontend_priv;
 	struct dvb_api_dtv_property* tvp = NULL;
-	struct neumo_dtv_frontend_properties getp;
+	struct neumo_dtv_frontend_properties *getp = &fepriv->getp;
 	int i, err;
 
-	memcpy(&getp, &fe->dtv_property_cache, sizeof(getp));
+	memcpy(getp, &fe->dtv_property_cache, sizeof(*getp));
 
 	dev_dbg(fe->dvb->device, "%s: properties.num = %d\n",
 		__func__, tvps->num);
@@ -3363,7 +3365,7 @@ static int dvbuapi_dvb_get_properties(struct neumo_dvb_frontend* fe, struct file
 	 */
 	if (fepriv->state != FESTATE_IDLE && fepriv->state != FESTATE_DISEQC) {
 		if(tvps->num > 1) {
-			err = dtv_get_frontend(fe, &getp, NULL);
+			err = dtv_get_frontend(fe, getp, NULL);
 			if(err<0) {
 				fe_dprintk(fe, "FAILED: prop=%d err=%d\n", tvp[i].cmd, err);
 			}
@@ -3372,7 +3374,7 @@ static int dvbuapi_dvb_get_properties(struct neumo_dvb_frontend* fe, struct file
 		}
 	}
 	for (i = 0; i < tvps->num; i++) {
-		err = dvbuapi_dtv_property_process_get(fe, &getp, tvp + i, file);
+		err = dvbuapi_dtv_property_process_get(fe, getp, tvp + i, file);
 		if (err < 0)
 			goto out;
 	}
@@ -3392,7 +3394,8 @@ out:
 static int dvb_get_frontend(struct neumo_dvb_frontend* fe,
 																				 struct dvb_frontend_parameters *p_out)
 {
-	struct neumo_dtv_frontend_properties getp;
+	struct neumo_dvb_frontend_private *fepriv = fe->frontend_priv;
+	struct neumo_dtv_frontend_properties *getp = &fepriv->getp;
 
 	/*
 	 * Let's use our own copy of property cache, in order to
@@ -3400,9 +3403,9 @@ static int dvb_get_frontend(struct neumo_dvb_frontend* fe,
 	 * return crap, if they don't check if the data is available
 	 * before updating the properties cache.
 	 */
-	memcpy(&getp, &fe->dtv_property_cache, sizeof(getp));
+	memcpy(getp, &fe->dtv_property_cache, sizeof(*getp));
 
-	return dtv_get_frontend(fe, &getp, p_out);
+	return dtv_get_frontend(fe, getp, p_out);
 }
 
 static int dvb_frontend_handle_ioctl(struct file *file, unsigned int cmd, void *parg)

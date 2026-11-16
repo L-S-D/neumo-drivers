@@ -90,4 +90,11 @@ struct neumo_dvb_frontend_private {
 	struct media_pipeline pipe;
 #endif
 	struct neumo_dtv_fe_algo_state algo_state;
+	/*
+	 * Copies of the property cache, too large for the kernel stack (about
+	 * 1.8 KB): one the frontend thread keeps across set_frontend(), one for
+	 * the properties an ioctl reports. Both used with the semaphore held.
+	 */
+	struct neumo_dtv_frontend_properties cache_save;
+	struct neumo_dtv_frontend_properties getp;
 };
