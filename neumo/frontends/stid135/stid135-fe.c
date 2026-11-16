@@ -849,6 +849,18 @@ static enum fe_ioctl_result stid135_select_rf_in_(struct stv* state, struct fe_r
 			state_dprintk("BUG: result=%s\n", reservation_result_str(result));
 	}
 
+	/* a demod leaves the rf_in in the middle of its unicable command: end it, or
+	 * the other demods find 18V and all their commands are refused */
+	if(old_rf_in && old_rf_in != new_rf_in && old_rf_in->unicable_cmd_owner == state) {
+		old_rf_in->unicable_cmd_owner = NULL;
+		if(old_rf_in->reservation.use_count > 0 && old_rf_in->voltage == SEC_VOLTAGE_18 &&
+			 old_rf_in->controlling_chip && old_rf_in->controlling_chip->set_voltage) {
+			state_dprintk("rf_in=%d left during a unicable command; back to 13V\n", old_rf_in_no);
+			old_rf_in->controlling_chip->set_voltage(old_rf_in->controlling_chip->i2c, SEC_VOLTAGE_13,
+																							 old_rf_in_no);
+			old_rf_in->voltage = SEC_VOLTAGE_13;
+		}
+	}
 	if(old_rf_in && old_rf_in->reservation.use_count==0) {
 		struct stv_chip_t* old_chip = old_rf_in->controlling_chip;
 		state_dprintk("old rf_in no longer in use: rf_in=%d; TONE OFF\n", old_rf_in_no);
@@ -2149,6 +2161,7 @@ static int stid135_set_voltage(struct neumo_dvb_frontend* fe, enum fe_sec_voltag
 		int old_voltage;
 		bool voltage_was_on;
 		bool voltage_is_on = (voltage != SEC_VOLTAGE_OFF);
+		bool ends_command;
 
 		card_lock(state); //DeepThought: maybe not needed (as it does not use stid135 chips)
 		/* test and set under the card lock: otherwise two demods sending unicable
@@ -2160,7 +2173,12 @@ static int stid135_set_voltage(struct neumo_dvb_frontend* fe, enum fe_sec_voltag
 			state_dprintk("Unicable command in progress; retry later");
 			return FE_UNICABLE_DISEQC_RETRY;
 		}
-		if(rf_in->reservation.use_count >1 && ! state->legacy_rf_in) {
+		/* the demod which raised the voltage for its unicable command ends it, even
+		 * when other demods joined the rf_in meanwhile: skipped, rf_in->voltage would
+		 * stay at 18V and every later command of every demod would be refused */
+		ends_command = rf_in->unicable_mode && old_voltage == SEC_VOLTAGE_18 &&
+			voltage == SEC_VOLTAGE_13 && rf_in->unicable_cmd_owner == state;
+		if(rf_in->reservation.use_count >1 && ! state->legacy_rf_in && !ends_command) {
 			card_unlock(state);
 			state_dprintk("SKIPPING set_voltage voltage=%s on=%d/%d "
 										"tuner_use_count=%d rf_in_use_count=%d owner=%d\n", voltage_str(voltage),
@@ -2169,6 +2187,7 @@ static int stid135_set_voltage(struct neumo_dvb_frontend* fe, enum fe_sec_voltag
 										tuner->reservation.owner);
 		} else {
 			rf_in->voltage = voltage;
+			rf_in->unicable_cmd_owner = (rf_in->unicable_mode && voltage == SEC_VOLTAGE_18) ? state : NULL;
 			card_unlock(state);
 			state_dprintk("calling set_voltage voltage=%s on=%d/%d "
 										"tuner_use_count=%d rf_in_use_count=%d owner=%d\n", voltage_str(voltage),

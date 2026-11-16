@@ -346,6 +346,7 @@ struct stv_rf_in_t {
 	bool unicable_mode; /*allow slaves to send unicable messages (including raising voltages and prevent certain
 												voltage changes*/
 	bool diseqc_tx_busy; /*a demod is waiting for the end of its diseqc message, with the chip mutex released*/
+	struct stv* unicable_cmd_owner; /*unicable_mode: the demod which raised the voltage to 18V for its command*/
 	struct stv_reservation_t reservation;
 };
 
