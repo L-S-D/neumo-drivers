@@ -63,7 +63,11 @@ struct sec_priv {
 	struct tbsecp3_adapter *adap;
 	int (*set_voltage)(struct neumo_dvb_frontend *fe,
 				 enum fe_sec_voltage voltage);
+	enum fe_sec_voltage voltage; /* the last one asked for */
 };
+
+/* the LNB GPIOs (read-modify-write of shared banks) and sec_priv.voltage */
+static DEFINE_MUTEX(tbsecp3_lnb_lock);
 static void ecp3_spi_read(struct i2c_adapter *i2c,u8 reg, u32 *buf)
 {
 	struct tbsecp3_i2c *i2c_adap = i2c_get_adapdata(i2c);
@@ -483,31 +487,49 @@ static int tbs6903x_set_voltage(struct i2c_adapter *i2c, enum fe_sec_voltage vol
 		return 0;
 }
 
+/*
+ * The other adapter on the LNB cable of this one, NULL: none. TBS 6508: the
+ * adapters 0/1, 2/3, 4/5 and 6/7 share one satellite input; both switch its
+ * LNB voltage (the same GPIOs), the DiSEqC of both goes out on the port of
+ * the even one (si2183_config.sec_client).
+ */
+static struct tbsecp3_adapter *tbsecp3_lnb_partner(struct tbsecp3_adapter *adap)
+{
+	struct tbsecp3_dev *dev = adap->dev;
+
+	switch (dev->info->board_id) {
+	case TBSECP3_BOARD_TBS6508:
+		if ((adap->nr ^ 1) < dev->info->adapters)
+			return &dev->adapter[adap->nr ^ 1];
+		return NULL;
+	default:
+		return NULL;
+	}
+}
+
 static int tbsecp3_set_voltage(struct neumo_dvb_frontend* fe,
 		enum fe_sec_voltage voltage)
 {
 	struct sec_priv *priv = fe->sec_priv;
 	struct tbsecp3_gpio_config *cfg = &priv->adap->cfg->gpio;
 	struct tbsecp3_dev *dev = priv->adap->dev;
-	bool is_slave;
+	struct tbsecp3_adapter *partner = tbsecp3_lnb_partner(priv->adap);
+	struct sec_priv *partner_priv;
+	enum fe_sec_voltage lnb_voltage = voltage;
 
 	dev_dbg(&dev->pci_dev->dev, "%s() %s\n", __func__,
 		voltage == SEC_VOLTAGE_13 ? "SEC_VOLTAGE_13" :
 		voltage == SEC_VOLTAGE_18 ? "SEC_VOLTAGE_18" :
 		"SEC_VOLTAGE_OFF");
 
-	is_slave =false;
-	switch(dev->info->board_id) {
-	case TBSECP3_BOARD_TBS6508:
-		is_slave = (fe->dvb->num %2); //odd numbered tuners are considered slaves
-		;
-	default:
-		;
-	}
-	dprintk("Set voltage voltage=%d\n", voltage);
-	if(is_slave)
-		return 0;
-	switch (voltage) {
+	mutex_lock(&tbsecp3_lnb_lock);
+	priv->voltage = voltage;
+	/* the LNB stays powered while the other adapter on its cable uses it */
+	partner_priv = partner && partner->fe2 ? partner->fe2->sec_priv : NULL;
+	if (voltage == SEC_VOLTAGE_OFF && partner_priv)
+		lnb_voltage = partner_priv->voltage;
+	dprintk("Set voltage voltage=%d lnb=%d\n", voltage, lnb_voltage);
+	switch (lnb_voltage) {
 		case SEC_VOLTAGE_13:
 			tbsecp3_gpio_set_pin(dev, &cfg->lnb_power, 1);
 			tbsecp3_gpio_set_pin(dev, &cfg->lnb_voltage, 0);
@@ -520,6 +542,7 @@ static int tbsecp3_set_voltage(struct neumo_dvb_frontend* fe,
 			tbsecp3_gpio_set_pin(dev, &cfg->lnb_power, 0);
 			break;
 	}
+	mutex_unlock(&tbsecp3_lnb_lock);
 
 	if (priv->set_voltage)
 		return priv->set_voltage(fe, voltage);
@@ -534,12 +557,16 @@ static void tbsecp3_release_sec(struct neumo_dvb_frontend* fe)
 	if (fe == NULL)
 		return;
 
+	mutex_lock(&tbsecp3_lnb_lock); /* tbsecp3_set_voltage() of the partner */
 	priv = fe->sec_priv;
-	if (priv == NULL)
+	if (priv == NULL) {
+		mutex_unlock(&tbsecp3_lnb_lock);
 		return;
+	}
 
 	fe->ops.set_voltage = priv->set_voltage;
 	fe->sec_priv = NULL;
+	mutex_unlock(&tbsecp3_lnb_lock);
 	kfree(priv);
 }
 
@@ -553,6 +580,7 @@ static struct neumo_dvb_frontend *tbsecp3_attach_sec(struct tbsecp3_adapter *ada
 
 	priv->set_voltage = fe->ops.set_voltage;
 	priv->adap = adap;
+	priv->voltage = SEC_VOLTAGE_OFF;
 
 //	fe->ops.release_sec = tbsecp3_release_sec;
 	fe->ops.set_voltage = tbsecp3_set_voltage;
@@ -1978,6 +2006,11 @@ static int tbsecp3_frontend_attach(struct tbsecp3_adapter *adapter)
 		strscpy(info.type, "si2183", I2C_NAME_SIZE);
 		info.addr = (adapter->nr %2) ? 0x67 : 0x64;
 		si2183_config.agc_mode = (adapter->nr %2)? 0x5 : 0x4;
+		/* the odd adapters have no LNB port wired: tone and DiSEqC go out on
+			 the port of the even one on the same satellite input (attached
+			 before them) */
+		if (adapter->nr % 2)
+			si2183_config.sec_client = dev->adapter[adapter->nr - 1].i2c_client_demod;
 		info.platform_data = &si2183_config;
 		request_module(info.type);
 		client_demod = i2c_new_client_device(i2c, &info);
@@ -2046,6 +2079,10 @@ static int tbsecp3_frontend_attach(struct tbsecp3_adapter *adapter)
 		//The following limits are determined by the tuner
 		adapter->fe2->ops.info.frequency_min_hz = 0;
 		adapter->fe2->ops.info.frequency_max_hz = 0xffffffff;
+		/* the satellite input: the one of the even adapter */
+		adapter->fe2->ops.info.rf_inputs[0] = adapter->nr & ~1;
+		adapter->fe2->ops.info.num_rf_inputs = 1;
+		adapter->fe2->ops.info.default_rf_input = adapter->nr & ~1;
 		if (dvb_attach(rda5816_attach, adapter->fe2, &rda5816_cfg[(adapter->nr %2)],
 				i2c) == NULL) {
 			dev_err(&dev->pci_dev->dev,
