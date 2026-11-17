@@ -1987,6 +1987,14 @@ static int tbsecp3_frontend_attach(struct tbsecp3_adapter *adapter)
 			i2c_unregister_device(client_demod);
 			goto frontend_atach_fail;
 		}
+		/*This needs to be repeated from above, because the dvb code
+			will decrease module refcnt once for each adapter and the
+			sat tuner would not have taken a reference: only the dvbt/dvbc tuner takes one and
+			fe2 is a copy of fe (see below)*/
+		if (!try_module_get(client_demod->dev.driver->owner)) {
+			i2c_unregister_device(client_demod);
+			goto frontend_atach_fail;
+		}
 		adapter->i2c_client_demod = client_demod;
 
 		/* dvb core doesn't support 2 tuners for 1 demod so
@@ -2002,6 +2010,10 @@ static int tbsecp3_frontend_attach(struct tbsecp3_adapter *adapter)
 		adapter->fe->ops.delsys[2] = SYS_DVBC_ANNEX_A;
 		adapter->fe->ops.delsys[3] = SYS_ISDBT;
 		adapter->fe->ops.delsys[4] = SYS_DVBC_ANNEX_B;
+		adapter->fe->ops.delsys[5] = SYS_AUTO;
+		//The following limits are determined by the tuner
+		adapter->fe->ops.info.frequency_min_hz = 0x0;
+		adapter->fe->ops.info.frequency_max_hz = 0xffffffff;
 
 		/* attach tuner */
 		memset(&si2157_config, 0, sizeof(si2157_config));
@@ -2029,7 +2041,11 @@ static int tbsecp3_frontend_attach(struct tbsecp3_adapter *adapter)
 		adapter->fe2->ops.delsys[0] = SYS_DVBS;
 		adapter->fe2->ops.delsys[1] = SYS_DVBS2;
 		adapter->fe2->ops.delsys[2] = SYS_DSS;
+		adapter->fe2->ops.delsys[3] = SYS_AUTO;
 		adapter->fe2->id = 1;
+		//The following limits are determined by the tuner
+		adapter->fe2->ops.info.frequency_min_hz = 0;
+		adapter->fe2->ops.info.frequency_max_hz = 0xffffffff;
 		if (dvb_attach(rda5816_attach, adapter->fe2, &rda5816_cfg[(adapter->nr %2)],
 				i2c) == NULL) {
 			dev_err(&dev->pci_dev->dev,
