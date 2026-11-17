@@ -62,6 +62,15 @@ struct si2183_config {
 	/*rf no.*/
 	u8 rf_in;
 
+	/*
+	 * the demodulator whose LNB port drives the LNB of this one, NULL: its
+	 * own (TBS 6508: the odd tuners have none wired, their even partner's
+	 * port drives the cable they share). The 22 kHz tone, DiSEqC and burst
+	 * of the satellite frontend go out there, and that demodulator stays
+	 * powered up while the satellite frontend of this one is in use.
+	 */
+	struct i2c_client *sec_client;
+
 	void (*TS_switch)(struct i2c_adapter * i2c,u8 flag);
 	void (*LED_switch)(struct i2c_adapter * i2c,u8 flag);
 	//update the FW.
@@ -151,7 +160,9 @@ struct si2183_dev {
 	void (*RF_switch)(struct i2c_adapter * i2c,u8 rf_in,u8 flag);
 	int nr; //adapter aka adapter number
 	u8 rf_in;
-	u8 active_fe;
+	u8 active_fe; /* the frontends in use (1 << fe->id), SI2183_SEC_USER */
+	struct mutex power_lock; /* active_fe, power up and down */
+	struct i2c_client *sec_client; /* see struct si2183_config */
 	struct spectrum_scan_state scan_state;
 	struct constellation_scan_state constellation_scan_state;
 	struct blindscan_state blindscan_state;

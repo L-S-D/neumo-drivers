@@ -1053,27 +1053,23 @@ int si2183_set_frontend(struct neumo_dvb_frontend *fe)
 	return ret;
 }
 
-static int si2183_init(struct neumo_dvb_frontend *fe)
+/*
+ * The power of the demodulator: up while one of its frontends is in use, or
+ * while another demodulator drives its LNB through this one's port
+ * (SI2183_SEC_USER, see struct si2183_config); state->power_lock.
+ */
+#define SI2183_SEC_USER (1 << 7)
+
+/* power up (load the firmware the first time) */
+static int si2183_power_up(struct i2c_client *client)
 {
-	struct i2c_client *client = fe->demodulator_priv;
 	struct si2183_dev* state = i2c_get_clientdata(client);
-	struct neumo_dtv_frontend_properties *c = &fe->dtv_property_cache;
 	int ret = 0, len, remaining;
 	const struct firmware *fw;
 	const char *fw_name;
 	struct si2183_cmd cmd;
 	unsigned int chip_id;
 	u16 prop;
-
-	dprintk("init");
-
-	if (state->active_fe) {
-		state->active_fe |= (1 << fe->id);
-		return 0;
-	}
-
-	c->cnr.len = 1;
-	c->cnr.stat[0].scale = FE_SCALE_DECIBEL;
 
 	/* initialize */
 	memcpy(cmd.args, "\xc0\x12\x00\x0c\x00\x0d\x16\x00\x00\x00\x00\x00\x00", 13);
@@ -1271,7 +1267,6 @@ static int si2183_init(struct neumo_dvb_frontend *fe)
 
 	state->fw_loaded = true;
  warm:
-	state->active_fe |= (1 << fe->id);
 	return 0;
 
  err:
@@ -1279,29 +1274,112 @@ static int si2183_init(struct neumo_dvb_frontend *fe)
 	return ret;
 }
 
-static int si2183_sleep(struct neumo_dvb_frontend *fe)
+static int si2183_power_down(struct i2c_client *client)
 {
-	struct i2c_client *client = fe->demodulator_priv;
-	struct si2183_dev* state = i2c_get_clientdata(client);
-	int ret;
 	struct si2183_cmd cmd;
-
-	//dev_dbg(&client->dev, "");
-
-	state->active_fe &= ~(1 << fe->id);
-	if (state->active_fe)
-		return 0;
+	int ret;
 
 	memcpy(cmd.args, "\x13", 1);
 	cmd.wlen = 1;
 	cmd.rlen = 0;
 	ret = si2183_cmd_execute(client, &cmd);
 	if (ret)
-		goto err;
+		dev_dbg(&client->dev, "failed=%d", ret);
+	return ret;
+}
 
-	return 0;
- err:
-	dev_dbg(&client->dev, "failed=%d", ret);
+/* the frontend is the satellite one of the demodulator */
+static bool si2183_fe_is_sat(struct neumo_dvb_frontend *fe)
+{
+	int i;
+
+	for (i = 0; i < MAX_DELSYS && fe->ops.delsys[i]; i++)
+		if (fe->ops.delsys[i] == SYS_DVBS || fe->ops.delsys[i] == SYS_DVBS2 ||
+				fe->ops.delsys[i] == SYS_DSS)
+			return true;
+	return false;
+}
+
+/* another demodulator drives its LNB through the port of this one: it stays
+ * powered up until si2183_sec_put() */
+static int si2183_sec_get(struct i2c_client *client)
+{
+	struct si2183_dev* state = i2c_get_clientdata(client);
+	int ret = 0;
+
+	mutex_lock(&state->power_lock);
+	if (!state->active_fe)
+		ret = si2183_power_up(client);
+	if (!ret)
+		state->active_fe |= SI2183_SEC_USER;
+	mutex_unlock(&state->power_lock);
+	return ret;
+}
+
+static void si2183_sec_put(struct i2c_client *client)
+{
+	struct si2183_dev* state = i2c_get_clientdata(client);
+
+	mutex_lock(&state->power_lock);
+	if (state->active_fe & SI2183_SEC_USER) {
+		state->active_fe &= ~SI2183_SEC_USER;
+		if (!state->active_fe)
+			si2183_power_down(client);
+	}
+	mutex_unlock(&state->power_lock);
+}
+
+/* the demodulator whose port the tone, DiSEqC and burst of fe go out on */
+static struct i2c_client *si2183_sec_out(struct neumo_dvb_frontend *fe)
+{
+	struct i2c_client *client = fe->demodulator_priv;
+	struct si2183_dev* state = i2c_get_clientdata(client);
+
+	return state->sec_client ? state->sec_client : client;
+}
+
+static int si2183_init(struct neumo_dvb_frontend *fe)
+{
+	struct i2c_client *client = fe->demodulator_priv;
+	struct si2183_dev* state = i2c_get_clientdata(client);
+	struct neumo_dtv_frontend_properties *c = &fe->dtv_property_cache;
+	int ret = 0;
+
+	dprintk("init");
+
+	c->cnr.len = 1;
+	c->cnr.stat[0].scale = FE_SCALE_DECIBEL;
+
+	mutex_lock(&state->power_lock);
+	if (!state->active_fe)
+		ret = si2183_power_up(client);
+	if (!ret)
+		state->active_fe |= (1 << fe->id);
+	mutex_unlock(&state->power_lock);
+
+	/* the LNB is driven through the port of another demodulator */
+	if (!ret && state->sec_client && si2183_fe_is_sat(fe)) {
+		ret = si2183_sec_get(state->sec_client);
+		if (ret)
+			dev_err(&client->dev, "power up of the LNB port's demodulator failed=%d", ret);
+	}
+	return ret;
+}
+
+static int si2183_sleep(struct neumo_dvb_frontend *fe)
+{
+	struct i2c_client *client = fe->demodulator_priv;
+	struct si2183_dev* state = i2c_get_clientdata(client);
+	int ret = 0;
+
+	if (state->sec_client && si2183_fe_is_sat(fe))
+		si2183_sec_put(state->sec_client);
+
+	mutex_lock(&state->power_lock);
+	state->active_fe &= ~(1 << fe->id);
+	if (!state->active_fe)
+		ret = si2183_power_down(client);
+	mutex_unlock(&state->power_lock);
 	return ret;
 }
 
@@ -1464,7 +1542,8 @@ static int send_diseqc_cmd(struct neumo_dvb_frontend *fe,
 													 u8 cont_tone, u8 tone_burst, u8 burst_sel,
 													 u8 end_seq, u8 msg_len, u8 *msg)
 {
-	struct i2c_client *client = fe->demodulator_priv;
+	/* the port that drives the LNB (TBS 6508: the even partner's) */
+	struct i2c_client *client = si2183_sec_out(fe);
 	struct si2183_cmd cmd;
 	u8 enable = 1;
 	cmd.args[0] = 0x8c;
@@ -1776,6 +1855,8 @@ static int si2183_probe(struct i2c_client *client)
 	state->RF_switch = config->RF_switch;
 	state->rf_in  = config->rf_in;
 	state->nr = config->rf_in;
+	state->sec_client = config->sec_client;
+	mutex_init(&state->power_lock);
 	state->fw_loaded = false;
 	//state->delivery_system = 0;
 	state->snr = 0;
