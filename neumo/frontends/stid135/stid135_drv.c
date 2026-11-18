@@ -10544,6 +10544,66 @@ fe_lla_error_t fe_stid135_get_isi(struct stv* state, u8 *p_isi_current)
 --PARAMS OUT	::	p_isi_struct -> Struct ISI Nb of ISI and ISI numbers
 --RETURN	::	Error (if any)
 --***************************************************/
+#define ISI_SCAN_SAMPLES 10
+
+/*
+ * Whether the ISI samples of one scan are a frame counter, not input streams.
+ * Some generic continuous ACM carriers (9.5E 11407H) signal multistream, but
+ * their MATYPE-2 goes up by one with every BBFrame: each sample, about 10 ms
+ * after the one before, is a new value above it. Ten samples, all different and
+ * each one 1..127 above the one before (mod 256), need ten input streams sent
+ * in that order; with fewer than ten ISIs a real multistream cannot give them.
+ */
+static bool isi_samples_count_frames(const u8 *isi, const int *error, int n)
+{
+	int i, k;
+
+	if (n < ISI_SCAN_SAMPLES)
+		return false;
+	for (i = 0; i < n; i++) {
+		if (error[i] != FE_LLA_NO_ERROR)
+			return false;
+		for (k = 0; k < i; k++)
+			if (isi[k] == isi[i])
+				return false;
+		if (i > 0 && (u8)(isi[i] - isi[i - 1]) > 127)
+			return false;
+	}
+	return true;
+}
+
+/* one ISI sample of a scan into the list (if it is a new one) */
+static void fe_stid135_isi_list_add(struct stv* state, u8 CurrentISI, int matype, int error, int error1)
+{
+	struct fe_sat_isi_struct_t* p_isi_struct = &state->signal_info.isi_list;
+	u32 j = CurrentISI/32;
+	uint32_t mask = ((uint32_t)1)<< (CurrentISI%32);
+
+	if(p_isi_struct->isi_bitset[j] & mask)
+		return;
+	state->mis_mode |= !fe_stid135_check_sis_or_mis(matype);
+	state_dprintk("Found new ISI=%d matype=%d error=%d mis=%d error1=%d\n",
+								CurrentISI, matype, error, state->mis_mode, error1);
+	if(p_isi_struct->default_isi < 0) {
+		if(state->mis_mode)  {
+			p_isi_struct->default_isi = CurrentISI;
+			p_isi_struct->default_matype = matype;
+		} else
+			p_isi_struct->default_matype = 256;
+	}
+	if(p_isi_struct->num_matypes < sizeof(p_isi_struct->matypes)/sizeof(p_isi_struct->matypes[0]))
+		p_isi_struct->matypes[p_isi_struct->num_matypes++] = (matype<<(int)8)|CurrentISI;
+	p_isi_struct->isi_bitset[j] |= mask;
+#if 1
+	if( ((CurrentISI ==255) ? -1 : (int) CurrentISI) == state->signal_info.isi) {
+		if(state->signal_info.matype != matype && state->signal_info.matype >= 0)
+			state_dprintk("Unexpected: state->signal_info.matype=%d != matype=%d isi=%d/%d\n",
+										state->signal_info.matype, matype, CurrentISI, state->signal_info.isi);
+		state->signal_info.matype = matype;
+	}
+#endif
+}
+
 fe_lla_error_t fe_stid135_isi_and_modcod_scan(struct stv* state, bool scan_isi, bool scan_modcod)
 {
 	struct fe_sat_isi_struct_t* p_isi_struct = &state->signal_info.isi_list;
@@ -10554,7 +10614,9 @@ fe_lla_error_t fe_stid135_isi_and_modcod_scan(struct stv* state, bool scan_isi, 
 	u8 CurrentISI;
 	int matype;
 	u8 i;
-	u32 j=0;
+	/* the ISI samples of this scan: they go into the list at the end */
+	u8 isis[ISI_SCAN_SAMPLES];
+	int matypes[ISI_SCAN_SAMPLES], errors[ISI_SCAN_SAMPLES], nisi = 0;
 	//struct fe_stid135_internal_param *pParams = (struct fe_stid135_internal_param *)handle;
 	if(!state->mis_mode /*&& ! p_isi_struct->is_vcm*/)
 		return 0;
@@ -10570,37 +10632,14 @@ fe_lla_error_t fe_stid135_isi_and_modcod_scan(struct stv* state, bool scan_isi, 
 		/* Setup HW to store Current ISI */
 		error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_PDELCTRL0_ISIOBS_MODE(demod), 0);
 		state_chip_sleep(state, 20);
-		/* Get Current ISI and store in struct */
-		for (i=0; i < 10; i++) {
-			uint32_t mask;
-			if(scan_isi && state->mis_mode) {
+		/* Get Current ISI and store in struct (no more of a frame counter) */
+		for (i=0; i < ISI_SCAN_SAMPLES; i++) {
+			if(scan_isi && state->mis_mode && !p_isi_struct->isi_counter) {
 				error |= (error1=fe_stid135_read_hw_matype(state, &matype, &CurrentISI));
-				j = CurrentISI/32;
 				p_isi_struct->is_vcm |= !((matype >> 4) & 1);
-				mask = ((uint32_t)1)<< (CurrentISI%32);
-				if( ! (p_isi_struct->isi_bitset[j] & mask)) {
-					state->mis_mode |= !fe_stid135_check_sis_or_mis(matype);
-					state_dprintk("Found new ISI=%d matype=%d error=%d mis=%d error1=%d\n",
-												CurrentISI, matype, error, state->mis_mode, error1);
-					if(p_isi_struct->default_isi < 0) {
-						if(state->mis_mode)  {
-							p_isi_struct->default_isi = CurrentISI;
-							p_isi_struct->default_matype = matype;
-						} else
-							p_isi_struct->default_matype = 256;
-					}
-					if(p_isi_struct->num_matypes < sizeof(p_isi_struct->matypes)/sizeof(p_isi_struct->matypes[0]))
-						p_isi_struct->matypes[p_isi_struct->num_matypes++] = (matype<<(int)8)|CurrentISI;
-					p_isi_struct->isi_bitset[j] |= mask;
-#if 1
-					if( ((CurrentISI ==255) ? -1 : (int) CurrentISI) == state->signal_info.isi) {
-						if(state->signal_info.matype != matype && state->signal_info.matype >= 0)
-							state_dprintk("Unexpected: state->signal_info.matype=%d != matype=%d isi=%d/%d\n",
-														state->signal_info.matype, matype, CurrentISI, state->signal_info.isi);
-						state->signal_info.matype = matype;
-					}
-#endif
-				}
+				isis[nisi] = CurrentISI;
+				matypes[nisi] = matype;
+				errors[nisi++] = error1;
 			}
 			if (scan_modcod && p_isi_struct->is_vcm) {
 				enum fe_sat_modcode	modcode;
@@ -10618,6 +10657,20 @@ fe_lla_error_t fe_stid135_isi_and_modcod_scan(struct stv* state, bool scan_isi, 
 		}
 		// Go back to previous value of test mode
 		error |= ChipSetField(state->chip->ip.handle_demod, FLD_FC8CODEW_DVBSX_PKTDELIN_TPKTDELIN_TESTBUS_SELECT(demod), 0);
+	}
+
+	if (isi_samples_count_frames(isis, errors, nisi)) {
+		/* the values of earlier scans were no ISIs either */
+		state_dprintk("MATYPE-2 counts the frames (%d..%d in %d samples): no ISI list\n",
+									isis[0], isis[nisi - 1], nisi);
+		memset(p_isi_struct->isi_bitset, 0, sizeof(p_isi_struct->isi_bitset));
+		p_isi_struct->num_matypes = 0;
+		p_isi_struct->default_isi = -1;
+		p_isi_struct->default_matype = -1;
+		p_isi_struct->isi_counter = true;
+	} else {
+		for (i = 0; i < nisi; i++)
+			fe_stid135_isi_list_add(state, isis[i], matypes[i], error, errors[i]);
 	}
 
 		dprintk("isi_and_modcod scan; num_matypes=%d\n", p_isi_struct->num_matypes);

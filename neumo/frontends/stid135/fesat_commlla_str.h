@@ -326,6 +326,7 @@ struct fe_sat_isi_struct_t
 	s16 default_isi;
 	s16 default_matype;
 	bool is_vcm;
+	bool isi_counter; //MATYPE-2 counts the frames: the carrier has no ISIs to list
 };
 typedef  struct fe_sat_isi_struct_t  fe_sat_isi_struct;
 
